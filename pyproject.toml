@@ -1,0 +1,19 @@
+[build-system]
+requires = [
+    "setuptools>=42",
+    "wheel",
+    "setuptools_scm>=6.4"
+]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 120
+
+[flake8]
+max-line-length = 120
+exclude = "./typings/**/*"
+ignore = "E203,W503"
+
+[tool.setuptools_scm]
+fallback_version = "unknown-no-.git-directory"
+local_scheme = "no-local-version"
