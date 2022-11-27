@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
 import pytest_asyncio
 from chia.rpc.full_node_rpc_api import FullNodeRpcApi
 from chia.rpc.full_node_rpc_client import FullNodeRpcClient
@@ -7,7 +12,18 @@ from chia.rpc.wallet_rpc_client import WalletRpcClient
 from chia.simulator.full_node_simulator import FullNodeSimulator
 from chia.simulator.setup_nodes import setup_simulators_and_wallets
 from chia.types.peer_info import PeerInfo
+from chia.util.db_wrapper import DBWrapper2
 from chia.util.ints import uint16
+from chia.wallet.util.wallet_types import WalletType
+
+from src.cb_wallet_store import CBWalletStore
+
+
+@pytest_asyncio.fixture(scope="function")
+async def node_and_wallet():
+    sims = setup_simulators_and_wallets(1, 1, {})
+    async for _ in sims:
+        yield _
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -86,7 +102,7 @@ async def maker_taker_rpc(two_wallets):
     client_taker = await WalletRpcClient.create(self_hostname, rpc_server_taker.listen_port, bt.root_path, config)
     client_node = await FullNodeRpcClient.create(self_hostname, rpc_server_node.listen_port, bt.root_path, config)
 
-    yield wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, client_node,
+    yield wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, client_node
 
     client_maker.close()
     client_taker.close()
@@ -100,3 +116,22 @@ async def maker_taker_rpc(two_wallets):
     await rpc_server_maker.await_closed()
     await rpc_server_taker.await_closed()
     await rpc_server_node.await_closed()
+
+
+@pytest.mark.asyncio
+async def test_cb_wallet_store(tmp_path: Any) -> None:
+    db_path = tmp_path / "clawback.db"
+    db_wrapper = await DBWrapper2.create(database=db_path, reader_count=1, db_version=1)
+    db = await CBWalletStore.create(db_wrapper)
+    await db.create_wallet("cat", WalletType.CAT.value, "")
+    await db.create_wallet("nft", WalletType.NFT.value, "")
+
+    wallets = await db.get_all_wallet_info_entries()
+    assert len(wallets) == 3
+    await db_wrapper.close()
+
+
+@pytest.mark.skip()
+@pytest.mark.asyncio
+async def test_cb_wallet_creation(maker_taker_rpc: Any) -> None:
+    wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, client_node = maker_taker_rpc
