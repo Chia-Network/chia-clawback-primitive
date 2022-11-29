@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.util.db_wrapper import DBWrapper2, execute_fetchone
 from chia.util.ints import uint32
 from chia.wallet.util.wallet_types import WalletType
@@ -12,7 +13,7 @@ from src.cb_wallet_info import CBWalletInfo
 
 class CBWalletStore:
     """
-    WalletUserStore keeps track of all user created wallets and necessary smart-contract data
+    Wallet Store keeps track of all user created wallets and necessary smart-contract data
     """
 
     db_wrapper: DBWrapper2
@@ -30,7 +31,8 @@ class CBWalletStore:
                     " name text,"
                     " wallet_type int,"
                     " data text,"
-                    " timelock int)"
+                    " timelock int,"
+                    " UNIQUE(wallet_type, timelock))"
                 )
             )
 
@@ -39,6 +41,8 @@ class CBWalletStore:
             await conn.execute("CREATE INDEX IF NOT EXISTS type on cb_wallets(wallet_type)")
 
             await conn.execute("CREATE INDEX IF NOT EXISTS data on cb_wallets(data)")
+
+            await conn.execute(("CREATE TABLE IF NOT EXISTS cb_inner_puzzles (" "puzzle_hash TEXT PRIMARY KEY)"))
 
         await self.init_wallet(timelock)
         return self
@@ -113,3 +117,19 @@ class CBWalletStore:
             row = await execute_fetchone(conn, "SELECT * from cb_wallets WHERE id=?", (id,))
 
         return None if row is None else CBWalletInfo(row[0], row[1], row[2], row[3], row[4])
+
+    async def add_inner_puzzle_hash(self, puzzle_hash: bytes32) -> None:
+        """
+        Add a puzzle hash to the store of inner puzzle hashes
+        """
+        async with self.db_wrapper.writer_maybe_transaction() as conn:
+            cursor = await conn.execute("INSERT OR REPLACE INTO cb_inner_puzzles VALUES(?)", (puzzle_hash,))
+            await cursor.close()
+
+    async def get_inner_puzzle_hashes(self) -> List[bytes32]:
+        """
+        Return a list of all known puzzle hashes
+        """
+        async with self.db_wrapper.reader_no_transaction() as conn:
+            rows = await conn.execute_fetchall("SELECT puzzle_hash from cb_inner_puzzles")
+            return [bytes32(row[0]) for row in rows]
