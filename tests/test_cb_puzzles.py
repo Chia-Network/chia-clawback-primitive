@@ -5,7 +5,7 @@ from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.util.ints import uint64
 from chia.wallet.lineage_proof import LineageProof
 from chia.wallet.puzzles.cat_loader import CAT_MOD
-from clvm.casts import int_to_bytes
+from clvm.casts import int_to_bytes, int_from_bytes
 
 from src.drivers.ach import (
     ClawbackInfo,
@@ -14,7 +14,10 @@ from src.drivers.ach import (
     solve_cb_outer_puzzle,
     solve_p2_merkle_claim,
     solve_p2_merkle_claw,
+    construct_clawback_puzzle,
+    construct_claim_puzzle,
 )
+from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import solution_for_conditions
 from src.load_clvm import load_clvm
 
 CB_MOD = load_clvm("cb_outer.clsp", package_or_requirement="src.clsp")
@@ -27,8 +30,67 @@ ACH_CLAWBACK_MOD = load_clvm("ach_clawback.clsp", package_or_requirement="src.cl
 ACH_CLAWBACK_MOD_HASH = ACH_CLAWBACK_MOD.get_tree_hash()
 ACS = Program.to(1)
 ACS_PH = ACS.get_tree_hash()
-# CAT_MOD = load_clvm("cat_v2.clvm", package_or_requirement="src.clsp")
 
+VALIDATOR_MOD = load_clvm("validator.clsp", package_or_requirement="src.clsp")
+VALIDATOR_MOD_HASH = VALIDATOR_MOD.get_tree_hash()
+P2_MERKLE_VALIDATOR_MOD = load_clvm("p2_merkle_validator.clsp", package_or_requirement="src.clsp")
+
+
+def test_ach_clawback_mod():
+    TIMELOCK = 600
+    amount = 10000
+    INNER_PUZ = ACS
+    pubkey = G1Element()
+    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    ach_cb_puz = ACH_CLAWBACK_MOD.curry(cb_info.puzzle_hash(), cb_info.inner_puzzle)
+    inner_sol = solution_for_conditions([[51, cb_info.puzzle_hash(), amount]])
+    sol = Program.to([inner_sol])
+    conds = ach_cb_puz.run(sol)
+    assert conds
+
+def test_p2_merkle_validator():
+    TIMELOCK = 600
+    amount = 10000
+    INNER_PUZ = ACS
+    pubkey = G1Element()
+    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    p2_merkle_ph = construct_p2_merkle_puzzle(cb_info, ACS_PH).get_tree_hash()
+    
+    CURRIED_DATA = [VALIDATOR_MOD_HASH, P2_MERKLE_VALIDATOR_MOD, ACH_CLAWBACK_MOD_HASH, ACH_COMPLETION_MOD_HASH, P2_MERKLE_MOD_HASH, TIMELOCK, cb_info.inner_puzzle]
+    
+    p2_merkle_validator = P2_MERKLE_VALIDATOR_MOD.curry([CURRIED_DATA])
+    p2_merkle_conds = [[51, p2_merkle_ph, 100], [61, "CCA"], [51, p2_merkle_ph, 300]]
+    solution_data = [ACS_PH, ACS_PH]
+    conds = p2_merkle_validator.run(Program.to([solution_data, p2_merkle_conds]))
+    cds = conds.as_python()
+    breakpoint()
+
+def test_validator():
+    TIMELOCK = 600
+    amount = 10000
+    INNER_PUZ = ACS
+    pubkey = G1Element()
+    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    target_ph = ACS_PH
+    p2_merkle_ph = construct_p2_merkle_puzzle(cb_info, target_ph).get_tree_hash()
+    
+    CURRIED_DATA = [VALIDATOR_MOD_HASH, P2_MERKLE_VALIDATOR_MOD, ACH_CLAWBACK_MOD_HASH, ACH_COMPLETION_MOD_HASH, P2_MERKLE_MOD_HASH, TIMELOCK, cb_info.inner_puzzle]
+    
+    puzzle_list = [[P2_MERKLE_VALIDATOR_MOD, CURRIED_DATA], [cb_info.inner_puzzle, []]]
+    puzzle_and_curry_params = Program.to(puzzle_list)
+    validator_puzzle = VALIDATOR_MOD.curry(puzzle_and_curry_params)
+
+    p2_merkle_conds = [[51, p2_merkle_ph, 100]]
+    inner_sol = solution_for_conditions(p2_merkle_conds)
+    validator_sol = Program.to([[[target_ph], inner_sol]])
+
+    # test_sol = Program.to([[CURRIED_DATA, [target_ph], p2_merkle_conds]])
+    # tcds = P2_MERKLE_VALIDATOR_MOD.run(test_sol)
+    # breakpoint()
+
+    conds = validator_puzzle.run(validator_sol)
+    cds = conds.as_python()
+    breakpoint()
 
 def test_clawback_cat():
     amount = uint64(10000)

@@ -1,0 +1,104 @@
+(mod (CURRIED_DATA solution_data conditions)
+  ;; CURRIED_DATA is whatever info we want curried in.
+  ;; CURRIED_DATA = (VALIDATOR_MOD_HASH P2_MERKLE_VALIDATOR_MOD ACH_CLAW_HASH ACH_CLAIM_HASH P2_MERKLE_HASH TIMELOCK INNER_PUZ)
+  
+  (include condition_codes.clib)
+  (include curry_and_treehash.clib)
+  (include utility_macros.clib)
+  (include merkle_utils.clib)
+  (include *standard-cl-21*)
+
+  (defun-inline opcode (condition) (f condition))
+  (defun-inline puzhash (condition) (f (r condition)))
+  (defun-inline amount (condition) (f (r (r condition))))
+  
+  (defun-inline VALIDATOR_MOD_HASH (CURRIED_DATA) (f (f CURRIED_DATA)))
+  (defun-inline P2_MERKLE_VALIDATOR_MOD (CURRIED_DATA) (f (r (f CURRIED_DATA))))
+  (defun-inline ACH_CLAW_HASH (CURRIED_DATA) (f (r (r (f CURRIED_DATA)))))
+  (defun-inline ACH_CLAIM_HASH (CURRIED_DATA) (f (r (r (r (f CURRIED_DATA))))))
+  (defun-inline P2_MERKLE_HASH (CURRIED_DATA) (f (r (r (r (r (f CURRIED_DATA)))))))
+  (defun-inline TIMELOCK (CURRIED_DATA) (f (r (r (r (r (r (f CURRIED_DATA))))))))
+  (defun-inline INNER_PUZ (CURRIED_DATA) (f (r (r (r (r (r (r (f CURRIED_DATA)))))))))
+
+  
+  (defun-inline curry_validator (VALIDATOR_MOD_HASH puzzle_list_with_params)
+    (puzzle_hash_of_curried_function VALIDATOR_MOD_HASH
+      (sha256tree puzzle_list_with_params)
+    )
+  )
+
+  (defun-inline curry_claw (ACH_CLAW_HASH INNER_PUZ clawback_ph)
+    (puzzle_hash_of_curried_function ACH_CLAW_HASH
+      (sha256tree INNER_PUZ)
+      (sha256 1 clawback_ph)
+    )
+  )
+
+  (defun-inline curry_claim (ACH_CLAIM_HASH TIMELOCK p2_ph)
+    (puzzle_hash_of_curried_function ACH_CLAIM_HASH
+      (sha256 1 p2_ph)
+      (sha256 1 TIMELOCK)
+    )
+  )
+
+  (defun-inline curry_merkle (P2_MERKLE_HASH MERKLE_ROOT)
+    (puzzle_hash_of_curried_function P2_MERKLE_HASH
+      (sha256 1 MERKLE_ROOT)
+    )
+  )
+
+  ;; Get the merkle root from two inputs
+  (defun-inline merkleize (left right)
+    (simplify_merkle_proof left (list 0 (sha256 1 right)))
+  )
+
+  (defun-inline create_p2_merkle_puzhash (CURRIED_DATA target_ph)
+    (curry_merkle (P2_MERKLE_HASH CURRIED_DATA)
+       (merkleize
+	 (curry_claw (ACH_CLAW_HASH CURRIED_DATA)
+	             (INNER_PUZ CURRIED_DATA)
+		     (curry_validator
+		       (VALIDATOR_MOD_HASH CURRIED_DATA)
+		       (list
+			 (P2_MERKLE_VALIDATOR_MOD CURRIED_DATA)
+			 (list
+			   (VALIDATOR_MOD_HASH CURRIED_DATA)
+			   (P2_MERKLE_VALIDATOR_MOD CURRIED_DATA)
+			   (ACH_CLAW_HASH CURRIED_DATA)
+			   (ACH_CLAIM_HASH CURRIED_DATA)
+			   (P2_MERKLE_HASH CURRIED_DATA)
+			   (TIMELOCK CURRIED_DATA)
+			   (INNER_PUZ CURRIED_DATA)
+			 )
+		       )
+	             )
+	 )
+	 (curry_claim (ACH_CLAIM_HASH CURRIED_DATA) (TIMELOCK CURRIED_DATA) target_ph)
+      )
+    )
+  )
+
+  (defun validate_condition (CURRIED_DATA target_ph condition)
+    (if (= (puzhash condition) (create_p2_merkle_puzhash CURRIED_DATA target_ph))
+      1
+      ;; TODO: Add another validator for the change condition, ie (= puzhash (curry_validator ...))
+      (x "CREATE_COIN puzhash is not a valid p2_merkle")
+    )
+  )
+
+  (defun main (CURRIED_DATA solution_data conditions)
+    (if (r conditions)
+      (if (= (opcode (f conditions)) CREATE_COIN)
+	(c
+	  (validate_condition CURRIED_DATA (f solution_data) (f conditions))
+	  (main CURRIED_DATA (r solution_data) (r conditions))
+	)
+	(main CURRIED_DATA solution_data (r conditions))
+      )      
+      (validate_condition CURRIED_DATA (f solution_data) (f conditions))
+    )
+  )
+
+  (main CURRIED_DATA solution_data conditions)
+
+)

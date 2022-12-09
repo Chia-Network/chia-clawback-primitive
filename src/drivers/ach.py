@@ -20,6 +20,10 @@ ACH_COMPLETION_MOD_HASH = ACH_COMPLETION_MOD.get_tree_hash()
 P2_MERKLE_MOD = load_clvm("p2_merkle_tree.clsp", package_or_requirement="src.clsp")
 P2_MERKLE_MOD_HASH = P2_MERKLE_MOD.get_tree_hash()
 
+VALIDATOR_MOD = load_clvm("validator.clsp", package_or_requirement="src.clsp")
+VALIDATOR_MOD_HASH = VALIDATOR_MOD.get_tree_hash()
+P2_MERKLE_VALIDATOR_MOD = load_clvm("p2_merkle_validator.clsp", package_or_requirement="src.clsp")
+
 
 @streamable
 @dataclass(frozen=True)
@@ -32,17 +36,29 @@ class ClawbackInfo(Streamable):
     def __post_init__(self) -> None:
         object.__setattr__(self, "inner_puzzle", puzzle_for_pk(self.pubkey))
 
+    def curry_params(self) -> List[Any]:
+        return [VALIDATOR_MOD_HASH, P2_MERKLE_VALIDATOR_MOD, ACH_CLAWBACK_MOD_HASH, ACH_COMPLETION_MOD_HASH, P2_MERKLE_MOD_HASH, self.timelock, self.inner_puzzle]
+
+    def puzzle_and_curry_params(self) -> Program:
+        return Program.to([P2_MERKLE_VALIDATOR_MOD, self.curry_params()])
+        
+    def outer_puzzle(self) -> Program:
+        return VALIDATOR_MOD.curry(self.puzzle_and_curry_params())
+
+    def puzzle_hash(self) -> bytes32:
+        return self.outer_puzzle().get_tree_hash()
+
+
+
+
 
 def construct_cb_outer_puzzle(clawback_info: ClawbackInfo) -> Program:
-    return CB_MOD.curry(
-        CB_MOD_HASH,
-        ACH_CLAWBACK_MOD_HASH,
-        ACH_COMPLETION_MOD_HASH,
-        P2_MERKLE_MOD_HASH,
-        clawback_info.timelock,
-        clawback_info.inner_puzzle.get_tree_hash(),
-    )
+    return clawback_info.outer_puzzle()
 
+
+def get_cb_puzzle_hash(clawback_info: ClawbackInfo) -> bytes32:
+    puz = construct_cb_outer_puzzle(clawback_info)
+    return puz.get_tree_hash()
 
 def solve_cb_outer_puzzle(clawback_info: ClawbackInfo, primaries: List[Dict[str, Any]]) -> Program:
     conditions = [[51, primary["puzzle_hash"], primary["amount"]] for primary in primaries]
@@ -59,7 +75,7 @@ def calculate_clawback_ph(clawback_info: ClawbackInfo) -> bytes32:
 
 
 def construct_clawback_puzzle(clawback_info: ClawbackInfo) -> Program:
-    return ACH_CLAWBACK_MOD.curry(calculate_clawback_ph(clawback_info), clawback_info.inner_puzzle.get_tree_hash())
+    return ACH_CLAWBACK_MOD.curry(clawback_info.outer_puzzle().get_tree_hash(), clawback_info.inner_puzzle)
 
 
 def calculate_merkle_tree(

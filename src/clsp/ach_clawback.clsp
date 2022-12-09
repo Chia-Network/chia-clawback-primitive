@@ -1,11 +1,10 @@
 (mod
   (
-    CLAWBACK_PH ;; has to be curried in by cb_outer
-    INNER_PH
-    my_amount
-    puzzle_reveal
+    CLAWBACK_PH
+    INNER_PUZ
     puzzle_solution
   )
+  ;; This puzzle should be solved with only 1 CREATE_COIN condition which takes the whole amount
 
   (include condition_codes.clib)
   (include curry_and_treehash.clib)
@@ -16,34 +15,30 @@
   (defun-inline puzhash (condition) (f (r condition)))
   (defun-inline amount (condition) (f (r (r condition))))
 
-  (defun check_for_clawback (conditions CLAWBACK_PH amount seen)
+  (defun check_for_clawback (conditions CLAWBACK_PH seen)
     (if conditions
       (c (f conditions)
         (check_for_clawback
           (r conditions)
           CLAWBACK_PH
-          amount
           (if (= CREATE_COIN (opcode (f conditions)))
               (assert
                 (not seen)  ; not seen
                 (= CLAWBACK_PH (puzhash (f conditions)))
-                (= amount (amount (f conditions)))
+                ;; (= amount (amount (f conditions)))
                 ; then
-                1
+		(+ seen (amount (f conditions)))
               )
               seen
           )
         )
       )
-      (assert seen ())
+      ;; Once we've gone through all conditions check we have seen at least 1 CC, and assert the amount
+      (assert seen (list (list ASSERT_MY_AMOUNT seen)))
     )
   )
 
   ; main
-  (assert (= (sha256tree puzzle_reveal) INNER_PH)
-    ; then
-    (c (list ASSERT_MY_AMOUNT my_amount)
-      (check_for_clawback (a puzzle_reveal puzzle_solution) CLAWBACK_PH my_amount ())
-    )
-  )
+  (check_for_clawback (a INNER_PUZ puzzle_solution) CLAWBACK_PH ())
+
 )
