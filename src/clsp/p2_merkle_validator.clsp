@@ -1,7 +1,19 @@
-(mod (CURRIED_DATA solution_data conditions)
-  ;; CURRIED_DATA is whatever info we want curried in.
-  ;; CURRIED_DATA = (VALIDATOR_MOD_HASH P2_MERKLE_VALIDATOR_MOD ACH_CLAW_HASH ACH_CLAIM_HASH P2_MERKLE_HASH TIMELOCK INNER_PUZ)
-  
+(mod (
+  (@ CURRIED_DATA
+    (
+      VALIDATOR_MOD_HASH
+      P2_MERKLE_VALIDATOR_MOD
+      ACH_CLAW_HASH
+      ACH_CLAIM_HASH
+      P2_MERKLE_HASH
+      TIMELOCK
+      INNER_PUZ
+    )
+  )
+  solution_data
+  conditions
+  )
+
   (include condition_codes.clib)
   (include curry_and_treehash.clib)
   (include utility_macros.clib)
@@ -11,19 +23,35 @@
   (defun-inline opcode (condition) (f condition))
   (defun-inline puzhash (condition) (f (r condition)))
   (defun-inline amount (condition) (f (r (r condition))))
-  
-  (defun-inline VALIDATOR_MOD_HASH (CURRIED_DATA) (f (f CURRIED_DATA)))
-  (defun-inline P2_MERKLE_VALIDATOR_MOD (CURRIED_DATA) (f (r (f CURRIED_DATA))))
-  (defun-inline ACH_CLAW_HASH (CURRIED_DATA) (f (r (r (f CURRIED_DATA)))))
-  (defun-inline ACH_CLAIM_HASH (CURRIED_DATA) (f (r (r (r (f CURRIED_DATA))))))
-  (defun-inline P2_MERKLE_HASH (CURRIED_DATA) (f (r (r (r (r (f CURRIED_DATA)))))))
-  (defun-inline TIMELOCK (CURRIED_DATA) (f (r (r (r (r (r (f CURRIED_DATA))))))))
-  (defun-inline INNER_PUZ (CURRIED_DATA) (f (r (r (r (r (r (r (f CURRIED_DATA)))))))))
 
-  
-  (defun-inline curry_validator (VALIDATOR_MOD_HASH puzzle_list_with_params)
+
+  (defun-inline my_cb_puzhash (
+    (@ CURRIED_DATA
+      (
+	VALIDATOR_MOD_HASH
+	P2_MERKLE_VALIDATOR_MOD
+	ACH_CLAW_HASH
+	ACH_CLAIM_HASH
+	P2_MERKLE_HASH
+	TIMELOCK
+	INNER_PUZ
+      )
+    )
+    )
+
     (puzzle_hash_of_curried_function VALIDATOR_MOD_HASH
-      (sha256tree puzzle_list_with_params)
+      (sha256tree
+        (list
+	  (list
+	    P2_MERKLE_VALIDATOR_MOD
+	    CURRIED_DATA
+	  )
+	  (list
+	    INNER_PUZ
+	    ()
+	  )
+	)
+      )
     )
   )
 
@@ -52,53 +80,83 @@
     (simplify_merkle_proof left (list 0 (sha256 1 right)))
   )
 
-  (defun-inline create_p2_merkle_puzhash (CURRIED_DATA target_ph)
-    (curry_merkle (P2_MERKLE_HASH CURRIED_DATA)
+  (defun-inline create_p2_merkle_puzhash (
+    (@ CURRIED_DATA
+      (
+	VALIDATOR_MOD_HASH
+	P2_MERKLE_VALIDATOR_MOD
+	ACH_CLAW_HASH
+	ACH_CLAIM_HASH
+	P2_MERKLE_HASH
+	TIMELOCK
+	INNER_PUZ
+      )
+    )
+    target_ph
+    )
+    
+    (curry_merkle P2_MERKLE_HASH
        (merkleize
-	 (curry_claw (ACH_CLAW_HASH CURRIED_DATA)
-	             (INNER_PUZ CURRIED_DATA)
-		     (curry_validator
-		       (VALIDATOR_MOD_HASH CURRIED_DATA)
-		       (list
-			 (P2_MERKLE_VALIDATOR_MOD CURRIED_DATA)
-			 (list
-			   (VALIDATOR_MOD_HASH CURRIED_DATA)
-			   (P2_MERKLE_VALIDATOR_MOD CURRIED_DATA)
-			   (ACH_CLAW_HASH CURRIED_DATA)
-			   (ACH_CLAIM_HASH CURRIED_DATA)
-			   (P2_MERKLE_HASH CURRIED_DATA)
-			   (TIMELOCK CURRIED_DATA)
-			   (INNER_PUZ CURRIED_DATA)
-			 )
-		       )
-	             )
+	 (curry_claw ACH_CLAW_HASH
+	             INNER_PUZ
+		     (my_cb_puzhash CURRIED_DATA)
 	 )
-	 (curry_claim (ACH_CLAIM_HASH CURRIED_DATA) (TIMELOCK CURRIED_DATA) target_ph)
+	 (curry_claim ACH_CLAIM_HASH TIMELOCK target_ph)
       )
     )
   )
 
+  
   (defun validate_condition (CURRIED_DATA target_ph condition)
     (if (= (puzhash condition) (create_p2_merkle_puzhash CURRIED_DATA target_ph))
-      1
-      ;; TODO: Add another validator for the change condition, ie (= puzhash (curry_validator ...))
-      (x "CREATE_COIN puzhash is not a valid p2_merkle")
+      (amount condition)
+      (if (= (puzhash condition) (my_cb_puzhash CURRIED_DATA))
+        (amount condition)
+        (x "CREATE_COIN puzhash is not a valid p2_merkle or cb_outer")  
+      )
     )
   )
 
-  (defun main (CURRIED_DATA solution_data conditions)
+
+  (defun validate_cc_conditions_and_get_amount (CURRIED_DATA solution_data conditions)
     (if (r conditions)
       (if (= (opcode (f conditions)) CREATE_COIN)
-	(c
+	(+
 	  (validate_condition CURRIED_DATA (f solution_data) (f conditions))
-	  (main CURRIED_DATA (r solution_data) (r conditions))
+	  (validate_cc_conditions_and_get_amount CURRIED_DATA (r solution_data) (r conditions))
 	)
-	(main CURRIED_DATA solution_data (r conditions))
-      )      
+	(validate_cc_conditions_and_get_amount CURRIED_DATA solution_data (r conditions))
+      )
       (validate_condition CURRIED_DATA (f solution_data) (f conditions))
     )
   )
 
-  (main CURRIED_DATA solution_data conditions)
 
+  (defun validate_assert_my_amount (conditions calculated_amount)
+    (if (r conditions)
+      (if (= (opcode (f conditions)) ASSERT_MY_AMOUNT)
+        (assert (= (f (r (f conditions))) calculated_amount)
+	  1
+	)
+	(validate_assert_my_amount (r conditions) calculated_amount)
+      )
+      (x "ASSERT_MY_AMOUNT not found")
+    )
+  )
+
+
+  (defun main (CURRIED_DATA solution_data conditions)
+    (validate_assert_my_amount
+      conditions
+      (validate_cc_conditions_and_get_amount
+        CURRIED_DATA
+	solution_data
+	conditions
+      )
+    )
+  )
+
+
+  (main CURRIED_DATA solution_data conditions)
+  
 )
