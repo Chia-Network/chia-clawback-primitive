@@ -106,8 +106,8 @@
     )
   )
 
-  
-  (defun validate_condition (CURRIED_DATA target_ph condition)
+
+  (defun validate_cc_condition (CURRIED_DATA target_ph condition)
     (if (= (puzhash condition) (create_p2_merkle_puzhash CURRIED_DATA target_ph))
       (amount condition)
       (if (= (puzhash condition) (my_cb_puzhash CURRIED_DATA))
@@ -119,21 +119,21 @@
 
 
   (defun validate_cc_conditions_and_get_amount (CURRIED_DATA solution_data conditions)
-    (if (r conditions)
+    (if conditions
       (if (= (opcode (f conditions)) CREATE_COIN)
 	(+
-	  (validate_condition CURRIED_DATA (f solution_data) (f conditions))
+	  (validate_cc_condition CURRIED_DATA (f solution_data) (f conditions))
 	  (validate_cc_conditions_and_get_amount CURRIED_DATA (r solution_data) (r conditions))
 	)
 	(validate_cc_conditions_and_get_amount CURRIED_DATA solution_data (r conditions))
       )
-      (validate_condition CURRIED_DATA (f solution_data) (f conditions))
+      ()
     )
   )
 
 
   (defun validate_assert_my_amount (conditions calculated_amount)
-    (if (r conditions)
+    (if conditions
       (if (= (opcode (f conditions)) ASSERT_MY_AMOUNT)
         (assert (= (f (r (f conditions))) calculated_amount)
 	  1

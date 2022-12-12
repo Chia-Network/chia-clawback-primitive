@@ -26,10 +26,9 @@
   )
 
   (defun run_validators (puzzle_list solutions (conditions . condition_summary))
-     ;; (list (f (r (f puzzle_list))) (f solutions) conditions)
      (if (r puzzle_list)
        (assert
-         (a (f (f puzzle_list)) (list (r (f puzzle_list)) (f solutions) conditions))
+         (a (f (f puzzle_list)) (list (f (r (f puzzle_list))) (f solutions) conditions))
 	 (run_validators (r puzzle_list) (r solutions) (c conditions condition_summary))
        )
        conditions
@@ -48,11 +47,12 @@
 
   (defun main (puzzle_list solutions)
     (run_validators puzzle_list
-    		    solutions
+		    solutions
 		    (build_condition_summary (run_inner_puzzle puzzle_list solutions)))
+
+
   )
 
-  
 
   (main PUZZLE_LIST_WITH_CURRY_PARAMETERS solutions)
 
