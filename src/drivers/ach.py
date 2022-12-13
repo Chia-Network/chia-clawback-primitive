@@ -37,11 +37,19 @@ class ClawbackInfo(Streamable):
         object.__setattr__(self, "inner_puzzle", puzzle_for_pk(self.pubkey))
 
     def curry_params(self) -> List[Any]:
-        return [VALIDATOR_MOD_HASH, P2_MERKLE_VALIDATOR_MOD, ACH_CLAWBACK_MOD_HASH, ACH_COMPLETION_MOD_HASH, P2_MERKLE_MOD_HASH, self.timelock, self.inner_puzzle]
+        return [
+            VALIDATOR_MOD_HASH,
+            P2_MERKLE_VALIDATOR_MOD,
+            ACH_CLAWBACK_MOD_HASH,
+            ACH_COMPLETION_MOD_HASH,
+            P2_MERKLE_MOD_HASH,
+            self.timelock,
+            self.inner_puzzle,
+        ]
 
     def puzzle_and_curry_params(self) -> Program:
-        return Program.to([P2_MERKLE_VALIDATOR_MOD, self.curry_params()])
-        
+        return Program.to([[P2_MERKLE_VALIDATOR_MOD, self.curry_params()], [self.inner_puzzle, []]])
+
     def outer_puzzle(self) -> Program:
         return VALIDATOR_MOD.curry(self.puzzle_and_curry_params())
 
@@ -49,21 +57,24 @@ class ClawbackInfo(Streamable):
         return self.outer_puzzle().get_tree_hash()
 
 
-
-
-
-def construct_cb_outer_puzzle(clawback_info: ClawbackInfo) -> Program:
-    return clawback_info.outer_puzzle()
-
-
 def get_cb_puzzle_hash(clawback_info: ClawbackInfo) -> bytes32:
-    puz = construct_cb_outer_puzzle(clawback_info)
+    puz = clawback_info.outer_puzzle()
     return puz.get_tree_hash()
 
+
 def solve_cb_outer_puzzle(clawback_info: ClawbackInfo, primaries: List[Dict[str, Any]]) -> Program:
-    conditions = [[51, primary["puzzle_hash"], primary["amount"]] for primary in primaries]
+    conditions = [
+        [51, construct_p2_merkle_puzzle(clawback_info, primary["puzzle_hash"]).get_tree_hash(), primary["amount"]]
+        for primary in primaries
+    ]
+    conditions.append([73, sum([primary["amount"] for primary in primaries])])
     inner_solution = solution_for_conditions(conditions)
-    return Program.to([clawback_info.amount, clawback_info.inner_puzzle, inner_solution])
+
+    solution_data = [primary["puzzle_hash"] for primary in primaries]
+    validator_solution = Program.to([[solution_data, inner_solution]])
+    return validator_solution
+
+    # return Program.to([clawback_info.amount, clawback_info.inner_puzzle, inner_solution])
 
 
 def construct_claim_puzzle(clawback_info: ClawbackInfo, target_ph: bytes32) -> Program:
@@ -71,7 +82,7 @@ def construct_claim_puzzle(clawback_info: ClawbackInfo, target_ph: bytes32) -> P
 
 
 def calculate_clawback_ph(clawback_info: ClawbackInfo) -> bytes32:
-    return construct_cb_outer_puzzle(clawback_info).get_tree_hash()
+    return clawback_info.outer_puzzle().get_tree_hash()
 
 
 def construct_clawback_puzzle(clawback_info: ClawbackInfo) -> Program:
@@ -100,7 +111,8 @@ def solve_claim_puzzle(amount: uint64) -> Program:
 def solve_claw_puzzle(clawback_info: ClawbackInfo, primary: Dict[str, Any]) -> Program:
     conditions = [[51, primary["puzzle_hash"], primary["amount"]]]
     inner_solution = solution_for_conditions(conditions)
-    return Program.to([primary["amount"], clawback_info.inner_puzzle, inner_solution])
+    # return Program.to([primary["amount"], clawback_info.inner_puzzle, inner_solution])
+    return Program.to([inner_solution])
 
 
 def solve_p2_merkle_claim(clawback_info: ClawbackInfo, amount: uint64, target_ph: bytes32) -> Program:
@@ -114,6 +126,7 @@ def solve_p2_merkle_claim(clawback_info: ClawbackInfo, amount: uint64, target_ph
 def solve_p2_merkle_claw(clawback_info: ClawbackInfo, primary: Dict[str, Any], target_ph: bytes32) -> Program:
     claw_puz = construct_clawback_puzzle(clawback_info)
     claw_sol = solve_claw_puzzle(clawback_info, primary)
+    claw_puz.run(claw_sol)
     merkle_tree = calculate_merkle_tree(clawback_info, target_ph)
     claw_proof = Program.to(merkle_tree[1][claw_puz.get_tree_hash()])
     return Program.to([claw_puz, claw_proof, claw_sol])
