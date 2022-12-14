@@ -4,6 +4,7 @@ from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.util.ints import uint64
 from chia.wallet.lineage_proof import LineageProof
+from chia.wallet.nft_wallet.nft_puzzles import NFT_METADATA_UPDATER, create_full_puzzle
 from chia.wallet.puzzles.cat_loader import CAT_MOD
 from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import solution_for_conditions
 from clvm.casts import int_to_bytes
@@ -151,6 +152,7 @@ def test_clawback_xch():
 
 
 def test_clawback_cat():
+
     amount = uint64(10000)
     TIMELOCK = 100
     pubkey = G1Element()
@@ -230,3 +232,39 @@ def test_clawback_cat():
     claimed_ph = bytes32([cond[1] for cond in claim_conds.as_python() if cond[0] == b"3"][0])
     claimed_cat = CAT_MOD.curry(CAT_MOD.get_tree_hash(), tail, ACS)
     assert claimed_ph == claimed_cat.get_tree_hash()
+
+
+def test_clawback_nft():
+    amount = uint64(1)
+    TIMELOCK = 100
+    pubkey = G1Element()
+    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+
+    maker_p2_ph = cb_info.outer_puzzle().get_tree_hash()
+    taker_p2_ph = ACS_PH
+
+    primaries = [{"puzzle_hash": taker_p2_ph, "amount": amount}]
+
+    cb_puz = cb_info.outer_puzzle()
+    cb_sol = solve_cb_outer_puzzle(cb_info, primaries)
+
+    merkle_puz = construct_p2_merkle_puzzle(cb_info, ACS_PH)
+
+    # Set up a Clawback NFT (non-did)
+    metadata = [
+        ("u", ["https://www.chia.net/img/branding/chia-logo.svg"]),
+        ("h", 0xD4584AD463139FA8C0D9F68F4B59F185),
+    ]
+    metadata_updater_puzhash = NFT_METADATA_UPDATER.get_tree_hash()
+    singleton_id = Program.to("singleton_id").get_tree_hash()
+    lineage_proof = Program.to([singleton_id, maker_p2_ph, 1])
+    nft_puz = create_full_puzzle(singleton_id, metadata, metadata_updater_puzhash, cb_puz)
+
+    nft_layer_solution = Program.to([cb_sol])
+    singleton_solution = Program.to([lineage_proof, amount, nft_layer_solution])
+
+    conds = nft_puz.run(singleton_solution)
+
+    merkle_nft = create_full_puzzle(singleton_id, metadata, metadata_updater_puzhash, merkle_puz)
+    cc_cond = [c[1] for c in conds.as_python() if c[0] == b"3"][0]
+    assert cc_cond == merkle_nft.get_tree_hash()
