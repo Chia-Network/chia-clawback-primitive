@@ -62,6 +62,31 @@ def get_cb_puzzle_hash(clawback_info: ClawbackInfo) -> bytes32:
     return puz.get_tree_hash()
 
 
+def solve_cb_outer_with_conds(clawback_info: ClawbackInfo, conditions: List[Any]) -> Program:
+    morphed_conds = []
+    solution_data = []
+    total_amount = 0
+    for cond in conditions:
+        if cond[0] == 51:
+            new_cond = [
+                51,
+                construct_p2_merkle_puzzle(clawback_info, cond[1]).get_tree_hash(),
+                cond[2]
+            ]
+            solution_data.append(cond[1])
+            total_amount += cond[2]
+            if len(cond) == 4:
+                new_cond.append([cond[3]])
+            morphed_conds.append(new_cond)
+        else:
+            morphed_conds.append(cond)
+
+    morphed_conds.append([73, total_amount])
+    inner_solution = solution_for_conditions(morphed_conds)
+    validator_solution = Program.to([[solution_data, inner_solution]])
+    return validator_solution
+
+
 def solve_cb_outer_puzzle(clawback_info: ClawbackInfo, primaries: List[Dict[str, Any]]) -> Program:
     conditions = [
         [51, construct_p2_merkle_puzzle(clawback_info, primary["puzzle_hash"]).get_tree_hash(), primary["amount"]]

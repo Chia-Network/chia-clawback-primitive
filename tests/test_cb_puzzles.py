@@ -9,7 +9,7 @@ from chia.wallet.puzzles.cat_loader import CAT_MOD
 from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import solution_for_conditions
 from clvm.casts import int_to_bytes
 
-from src.drivers.ach import (
+from src.drivers.cb_puzzles import (
     ClawbackInfo,
     construct_p2_merkle_puzzle,
     solve_cb_outer_puzzle,
