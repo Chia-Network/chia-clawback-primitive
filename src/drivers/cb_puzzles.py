@@ -29,7 +29,6 @@ P2_MERKLE_VALIDATOR_MOD = load_clvm("p2_merkle_validator.clsp", package_or_requi
 @dataclass(frozen=True)
 class ClawbackInfo(Streamable):
     timelock: uint64
-    amount: uint64
     pubkey: G1Element
     inner_puzzle: Program = field(init=False)
 
@@ -68,11 +67,7 @@ def solve_cb_outer_with_conds(clawback_info: ClawbackInfo, conditions: List[Any]
     total_amount = 0
     for cond in conditions:
         if cond[0] == 51:
-            new_cond = [
-                51,
-                construct_p2_merkle_puzzle(clawback_info, cond[1]).get_tree_hash(),
-                cond[2]
-            ]
+            new_cond = [51, construct_p2_merkle_puzzle(clawback_info, cond[1]).get_tree_hash(), cond[2]]
             solution_data.append(cond[1])
             total_amount += cond[2]
             if len(cond) == 4:

@@ -36,9 +36,8 @@ P2_MERKLE_VALIDATOR_MOD = load_clvm("p2_merkle_validator.clsp", package_or_requi
 
 def test_p2_merkle_validator():
     TIMELOCK = 600
-    amount = 10000
     pubkey = G1Element()
-    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    cb_info = ClawbackInfo(TIMELOCK, pubkey)
     p2_merkle_ph = construct_p2_merkle_puzzle(cb_info, ACS_PH).get_tree_hash()
 
     CURRIED_DATA = [
@@ -71,9 +70,8 @@ def test_p2_merkle_validator():
 
 def test_validator():
     TIMELOCK = 600
-    amount = 10000
     pubkey = G1Element()
-    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    cb_info = ClawbackInfo(TIMELOCK, pubkey)
     target_ph = ACS_PH
     p2_merkle_ph = construct_p2_merkle_puzzle(cb_info, target_ph).get_tree_hash()
 
@@ -109,10 +107,9 @@ def test_validator():
 
 
 def test_clawback_xch():
-    amount = 10000
     TIMELOCK = 100
     pubkey = G1Element()
-    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    cb_info = ClawbackInfo(TIMELOCK, pubkey)
     amt_1 = 200
     amt_2 = 800
     primaries = [{"puzzle_hash": ACS_PH, "amount": amt_1}, {"puzzle_hash": ACS_PH, "amount": amt_2}]
@@ -156,7 +153,7 @@ def test_clawback_cat():
     amount = uint64(10000)
     TIMELOCK = 100
     pubkey = G1Element()
-    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    cb_info = ClawbackInfo(TIMELOCK, pubkey)
     primaries = [{"puzzle_hash": ACS_PH, "amount": amount}]
 
     cb_puz = cb_info.outer_puzzle()
@@ -238,7 +235,7 @@ def test_clawback_nft():
     amount = uint64(1)
     TIMELOCK = 100
     pubkey = G1Element()
-    cb_info = ClawbackInfo(TIMELOCK, amount, pubkey)
+    cb_info = ClawbackInfo(TIMELOCK, pubkey)
 
     maker_p2_ph = cb_info.outer_puzzle().get_tree_hash()
     taker_p2_ph = ACS_PH
