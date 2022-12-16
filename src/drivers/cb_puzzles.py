@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple
 from blspy import G1Element
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.util.ints import uint64
+from chia.util.ints import uint32, uint64
 from chia.util.streamable import Streamable, streamable
 from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import puzzle_for_pk, solution_for_conditions
 
@@ -28,7 +28,7 @@ P2_MERKLE_VALIDATOR_MOD = load_clvm("p2_merkle_validator.clsp", package_or_requi
 @streamable
 @dataclass(frozen=True)
 class ClawbackInfo(Streamable):
-    timelock: uint64
+    timelock: uint32
     pubkey: G1Element
     inner_puzzle: Program = field(init=False)
 
