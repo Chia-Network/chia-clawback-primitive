@@ -123,7 +123,7 @@ def get_address_cmd(
     default=1,
 )
 @click.option(
-    "-f",
+    "-d",
     "--fee",
     help="The fee for the funding transaction",
     required=False,
@@ -285,7 +285,14 @@ def get_cb_coins_cmd(
     required=True,
     type=str,
 )
-@click.option("-f", "--fee", help="The fee amount (in mojos) to send", required=False, type=int, default=0)
+@click.option(
+    "-d",
+    "--fee",
+    help="The fee in mojos for this transaction",
+    required=False,
+    type=int,
+    default=0,
+)
 @click.option(
     "-wp",
     "--wallet-rpc-port",
@@ -331,10 +338,15 @@ def send_clawback_cmd(
             cb_manager = CBManager(node_client, wallet_client)
             cb_info = await cb_manager.set_cb_info(timelock)
             target_puzzle_hash = decode_puzzle_hash(target_address)
-            sb = await cb_manager.send_cb_coin(amount, target_puzzle_hash)
+            cb_spend = await cb_manager.send_cb_coin(amount, target_puzzle_hash)
+            if fee > 0:
+                fee_spend = await cb_manager.create_fee_spend(fee)
+                sb = SpendBundle.aggregate([cb_spend, fee_spend])
+            else:
+                sb = cb_spend
             res = await node_client.push_tx(sb)
             assert res["success"]
-            p2_merkle_coins = [coin for coin in sb.additions() if coin.puzzle_hash != cb_info.puzzle_hash()]
+            p2_merkle_coins = [coin for coin in cb_spend.additions() if coin.puzzle_hash != cb_info.puzzle_hash()]
             print("Created coin ids:")
             for coin in p2_merkle_coins:
                 print("{}".format(coin.name().hex()))
@@ -376,6 +388,14 @@ def send_clawback_cmd(
     type=str,
 )
 @click.option(
+    "-d",
+    "--fee",
+    help="The fee in mojos for this transaction",
+    required=False,
+    type=int,
+    default=0,
+)
+@click.option(
     "-wp",
     "--wallet-rpc-port",
     help="Set the port where the Wallet is hosting the RPC interface. See the rpc_port under wallet in config.yaml",
@@ -403,6 +423,7 @@ def clawback_coin_cmd(
     timelock: int,
     target_address: str,
     coin_ids: List[str],
+    fee: int,
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
     node_rpc_port: Optional[int] = None,
@@ -420,7 +441,12 @@ def clawback_coin_cmd(
             await cb_manager.set_cb_info(timelock)
             coin_id_bytes = [bytes32.from_hexstr(coin_id) for coin_id in coin_ids]
             target_puzzle_hash = decode_puzzle_hash(target_address)
-            sb = await cb_manager.clawback_p2_merkle_coin_ids(coin_id_bytes, target_puzzle_hash)
+            cb_spend = await cb_manager.clawback_p2_merkle_coin_ids(coin_id_bytes, target_puzzle_hash)
+            if fee > 0:
+                fee_spend = await cb_manager.create_fee_spend(fee)
+                sb = SpendBundle.aggregate([cb_spend, fee_spend])
+            else:
+                sb = cb_spend
             res = await node_client.push_tx(sb)
             assert res["success"]
             print(res)
@@ -453,6 +479,14 @@ def clawback_coin_cmd(
     type=str,
 )
 @click.option(
+    "-d",
+    "--fee",
+    help="The fee in mojos for this transaction",
+    required=False,
+    type=int,
+    default=0,
+)
+@click.option(
     "-wp",
     "--wallet-rpc-port",
     help="Set the port where the Wallet is hosting the RPC interface. See the rpc_port under wallet in config.yaml",
@@ -479,6 +513,7 @@ def clawback_coin_cmd(
 def claim_coin_cmd(
     target_address: str,
     coin_id: str,
+    fee: int,
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
     node_rpc_port: Optional[int] = None,
@@ -495,8 +530,13 @@ def claim_coin_cmd(
             cb_manager = CBManager(node_client, wallet_client)
             target_puzzle_hash = decode_puzzle_hash(target_address)
             coin_id_bytes = bytes32.from_hexstr(coin_id)
-            spend_bundle = await cb_manager.claim_p2_merkle(coin_id_bytes, target_puzzle_hash)
-            res = await node_client.push_tx(spend_bundle)
+            cb_spend = await cb_manager.claim_p2_merkle(coin_id_bytes, target_puzzle_hash)
+            if fee > 0:
+                fee_spend = await cb_manager.create_fee_spend(fee)
+                sb = SpendBundle.aggregate([cb_spend, fee_spend])
+            else:
+                sb = cb_spend
+            res = await node_client.push_tx(sb)
             print(res)
 
         finally:

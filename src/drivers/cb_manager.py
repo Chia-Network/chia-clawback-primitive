@@ -182,3 +182,11 @@ class CBManager:
         coin_spend = CoinSpend(coin, p2_merkle_puz, claim_sol)
         spend_bundle = SpendBundle([coin_spend], G2Element())
         return spend_bundle
+
+    async def create_fee_spend(self, fee: uint64) -> SpendBundle:
+        spendable_coins = await self.wallet_client.get_spendable_coins(1, min_coin_amount=fee)
+        coin = spendable_coins[0][0].coin
+        addition = {"puzzle_hash": coin.puzzle_hash, "amount": coin.amount - fee}
+        fee_tx = await self.wallet_client.create_signed_transaction([addition], coins=[coin], fee=fee)
+        assert isinstance(fee_tx.spend_bundle, SpendBundle)
+        return fee_tx.spend_bundle
