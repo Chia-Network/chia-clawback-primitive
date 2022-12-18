@@ -27,6 +27,7 @@ from src.drivers.cb_puzzles import (
     solve_cb_outer_puzzle,
     solve_p2_merkle_claim,
     solve_p2_merkle_claw,
+    uncurry_clawback,
 )
 
 
@@ -34,10 +35,10 @@ class CBManager:
     node_client: FullNodeRpcClient
     wallet_client: WalletRpcClient
 
-    def __init__(self, node_client: FullNodeRpcClient, wallet_client: WalletRpcClient, timelock: uint32 = TWO_WEEKS):
+    def __init__(self, node_client: FullNodeRpcClient, wallet_client: WalletRpcClient):
         self.node_client = node_client
         self.wallet_client = wallet_client
-        self.timelock = timelock
+        # self.timelock = timelock
 
     async def get_private_key(self, index: uint32 = uint32(1)) -> PrivateKey:
         fp = await self.wallet_client.get_logged_in_fingerprint()
@@ -50,7 +51,8 @@ class CBManager:
         private_key = await self.get_private_key(index)
         return private_key.get_g1()
 
-    async def set_cb_info(self) -> ClawbackInfo:
+    async def set_cb_info(self, timelock: uint32 = TWO_WEEKS) -> ClawbackInfo:
+        self.timelock = timelock
         pk = await self.get_public_key()
         self.cb_info = ClawbackInfo(self.timelock, pk)
         return self.cb_info
@@ -78,7 +80,7 @@ class CBManager:
 
     async def select_coins(self, amount: uint64) -> List[Coin]:
         cb_coin_recs = await self.get_cb_coins()
-        cb_coin_recs.sort(key=lambda x: x.coin.amount)
+        cb_coin_recs.sort(key=lambda x: x.coin.amount, reverse=True)
         total = 0
         selected = []
         for coin_rec in cb_coin_recs:
@@ -120,13 +122,25 @@ class CBManager:
         return SpendBundle(coin_spends, aggsig)
 
     async def send_cb_coin(self, amount: uint64, target_puzzle_hash: bytes32) -> SpendBundle:
-        # p2_merkle_ph = construct_p2_merkle_puzzle(self.cb_info, target_puzzle_hash).get_tree_hash()
-        primaries = [{"puzzle_hash": target_puzzle_hash, "amount": amount}]
-        cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries)
         coins = await self.select_coins(amount)
-        coin_spends = [CoinSpend(coin, self.cb_info.outer_puzzle(), cb_solution) for coin in coins]
+        change = uint64(sum([coin.amount for coin in coins]) - amount)
+        coin_spends = []
+        total_amount = 0
+        for coin in coins:
+            total_amount += coin.amount
+            if total_amount >= amount:
+                # this is the last coin to spend
+                primaries = [
+                    {"puzzle_hash": target_puzzle_hash, "amount": coin.amount - change},
+                ]
+                cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, change)
+            else:
+                primaries = [
+                    {"puzzle_hash": target_puzzle_hash, "amount": coin.amount},
+                ]
+                cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, uint64(0))
+            coin_spends.append(CoinSpend(coin, self.cb_info.outer_puzzle(), cb_solution))
         spend_bundle = await self.sign_coin_spends(coin_spends)
-        # await self.node_client.push_tx(spend_bundle)
         return spend_bundle
 
     async def get_p2_merkle_coins(self, target_puzzle_hash: bytes32) -> List[Coin]:
@@ -134,17 +148,37 @@ class CBManager:
         coin_recs = await self.node_client.get_coin_records_by_puzzle_hash(p2_merkle_ph, include_spent_coins=False)
         return [cr.coin for cr in coin_recs]
 
-    async def clawback_p2_merkle(self, coin: Coin, target_puzzle_hash: bytes32) -> SpendBundle:
+    async def clawback_p2_merkle(self, coins: List[Coin], target_puzzle_hash: bytes32) -> SpendBundle:
         p2_merkle_puz = construct_p2_merkle_puzzle(self.cb_info, target_puzzle_hash)
-        claw_primary = {"puzzle_hash": self.cb_info.outer_puzzle().get_tree_hash(), "amount": coin.amount}
-        claw_sol = solve_p2_merkle_claw(self.cb_info, claw_primary, target_puzzle_hash)
-        coin_spends = [CoinSpend(coin, p2_merkle_puz, claw_sol)]
+        coin_spends = []
+        for coin in coins:
+            claw_primary = {"puzzle_hash": self.cb_info.outer_puzzle().get_tree_hash(), "amount": coin.amount}
+            claw_sol = solve_p2_merkle_claw(self.cb_info, claw_primary, target_puzzle_hash)
+            coin_spends.append(CoinSpend(coin, p2_merkle_puz, claw_sol))
         spend_bundle = await self.sign_coin_spends(coin_spends)
         return spend_bundle
 
-    async def claim_p2_merkle(self, coin: Coin, target_puzzle_hash: bytes32) -> SpendBundle:
-        p2_merkle_puz = construct_p2_merkle_puzzle(self.cb_info, target_puzzle_hash)
-        claim_sol = solve_p2_merkle_claim(self.cb_info, uint64(coin.amount), target_puzzle_hash)
+    async def clawback_p2_merkle_coin_ids(self, coin_ids: List[bytes32], target_puzzle_hash: bytes32) -> SpendBundle:
+        coin_recs = await self.node_client.get_coin_records_by_names(coin_ids)
+        coins = [cr.coin for cr in coin_recs]
+        return await self.clawback_p2_merkle(coins, target_puzzle_hash)
+
+    async def claim_p2_merkle(self, coin_id: bytes32, target_puzzle_hash: bytes32) -> SpendBundle:
+        coin_rec = await self.node_client.get_coin_record_by_name(coin_id)
+        assert isinstance(coin_rec, CoinRecord)
+        coin = coin_rec.coin
+        coin_spend = await self.node_client.get_puzzle_and_solution(
+            coin.parent_coin_info, coin_rec.confirmed_block_index
+        )
+        assert isinstance(coin_spend, CoinSpend)
+        puz = coin_spend.puzzle_reveal.to_program()
+        timelock, sender_inner_puzzle = uncurry_clawback(puz)
+        parent_coin_rec = await self.node_client.get_coin_record_by_name(coin.parent_coin_info)
+        assert isinstance(parent_coin_rec, CoinRecord)
+        cb_puzzle_hash = parent_coin_rec.coin.puzzle_hash
+        p2_merkle_puz, claim_sol = solve_p2_merkle_claim(
+            timelock, uint64(coin.amount), target_puzzle_hash, cb_puzzle_hash, sender_inner_puzzle
+        )
         coin_spend = CoinSpend(coin, p2_merkle_puz, claim_sol)
         spend_bundle = SpendBundle([coin_spend], G2Element())
         return spend_bundle

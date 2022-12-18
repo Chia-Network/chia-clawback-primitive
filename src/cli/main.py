@@ -1,8 +1,10 @@
 import asyncio
-from typing import Optional
+from typing import List, Optional
 
 import click
+from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.spend_bundle import SpendBundle
+from chia.util.bech32m import decode_puzzle_hash
 from chia.util.ints import uint64
 
 from src import __version__
@@ -34,7 +36,7 @@ def cli(ctx: click.Context) -> None:
     short_help="Get a clawback address",
 )
 @click.option(
-    "-t",
+    "-l",
     "--timelock",
     help="The timelock to use for the cb coin you're creating. Default is two weeks",
     required=False,
@@ -80,8 +82,8 @@ def get_address_cmd(
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
 
         try:
-            cb_manager = CBManager(node_client, wallet_client, timelock)
-            await cb_manager.set_cb_info()
+            cb_manager = CBManager(node_client, wallet_client)
+            await cb_manager.set_cb_info(timelock)
             res = await cb_manager.get_cb_address()
             print(res)
         finally:
@@ -98,7 +100,7 @@ def get_address_cmd(
     short_help="Send xch to a clawback coin",
 )
 @click.option(
-    "-t",
+    "-l",
     "--timelock",
     help="The timelock to use for the cb coin you're creating. Default is two weeks",
     required=False,
@@ -170,8 +172,8 @@ def create_cb_cmd(
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
 
         try:
-            cb_manager = CBManager(node_client, wallet_client, timelock)
-            cb_info = await cb_manager.set_cb_info()
+            cb_manager = CBManager(node_client, wallet_client)
+            cb_info = await cb_manager.set_cb_info(timelock)
             additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount}]
             tx = await wallet_client.create_signed_transaction(
                 additions=additions, wallet_id=wallet_id, fee=uint64(fee)
@@ -197,7 +199,7 @@ def create_cb_cmd(
     short_help="Get details for all clawback coins for a given timelock",
 )
 @click.option(
-    "-t",
+    "-l",
     "--timelock",
     help="The timelock to use for the cb coin you're creating. Default is two weeks",
     required=False,
@@ -243,14 +245,260 @@ def get_cb_coins_cmd(
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
 
         try:
-            cb_manager = CBManager(node_client, wallet_client, timelock)
-            await cb_manager.set_cb_info()
+            cb_manager = CBManager(node_client, wallet_client)
+            await cb_manager.set_cb_info(timelock)
             coins = await cb_manager.get_cb_coins()
             total_amount = 0
             for coin_rec in coins:
                 print("{}".format(coin_rec.coin))
                 total_amount += coin_rec.coin.amount
             print("\nAvailable clawback balance: {} mojos".format(total_amount))
+        finally:
+            node_client.close()
+            wallet_client.close()
+            await node_client.await_closed()
+            await wallet_client.await_closed()
+
+    asyncio.get_event_loop().run_until_complete(do_command())
+
+
+@cli.command("send-clawback", short_help="Send a clawback transaction")
+@click.option(
+    "-l",
+    "--timelock",
+    help="The timelock on the coin(s) you want to spend. Default is two weeks",
+    required=False,
+    type=int,
+    default=TWO_WEEKS,
+)
+@click.option(
+    "-a",
+    "--amount",
+    help="The amount (in mojos) to send",
+    required=True,
+    type=int,
+)
+@click.option(
+    "-t",
+    "--target-address",
+    help="The target address of the clawback",
+    required=True,
+    type=str,
+)
+@click.option("-f", "--fee", help="The fee amount (in mojos) to send", required=False, type=int, default=0)
+@click.option(
+    "-wp",
+    "--wallet-rpc-port",
+    help="Set the port where the Wallet is hosting the RPC interface. See the rpc_port under wallet in config.yaml",
+    required=False,
+    type=int,
+    default=None,
+)
+@click.option(
+    "-f",
+    "--fingerprint",
+    help="Set the fingerprint to specify which wallet to use",
+    required=False,
+    type=int,
+    default=None,
+)
+@click.option(
+    "-np",
+    "--node-rpc-port",
+    help="Set the port where the Node is hosting the RPC interface. See the rpc_port under full_node in config.yaml",
+    required=False,
+    type=int,
+    default=None,
+)
+def send_clawback_cmd(
+    timelock: int,
+    amount: int,
+    target_address: str,
+    fee: int,
+    wallet_rpc_port: Optional[int] = None,
+    fingerprint: Optional[int] = None,
+    node_rpc_port: Optional[int] = None,
+):
+    """
+    \b
+    Create a transaction to fund a clawback coin
+    """
+
+    async def do_command():
+        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
+
+        try:
+            cb_manager = CBManager(node_client, wallet_client)
+            cb_info = await cb_manager.set_cb_info(timelock)
+            target_puzzle_hash = decode_puzzle_hash(target_address)
+            sb = await cb_manager.send_cb_coin(amount, target_puzzle_hash)
+            res = await node_client.push_tx(sb)
+            assert res["success"]
+            p2_merkle_coins = [coin for coin in sb.additions() if coin.puzzle_hash != cb_info.puzzle_hash()]
+            print("Created coin ids:")
+            for coin in p2_merkle_coins:
+                print("{}".format(coin.name().hex()))
+
+        finally:
+            node_client.close()
+            wallet_client.close()
+            await node_client.await_closed()
+            await wallet_client.await_closed()
+
+    asyncio.get_event_loop().run_until_complete(do_command())
+
+
+@cli.command(
+    "clawback",
+    short_help="Get details for all clawback coins for a given timelock",
+)
+@click.option(
+    "-l",
+    "--timelock",
+    help="The timelock to use for the cb coin you're creating. Default is two weeks",
+    required=False,
+    type=int,
+    default=TWO_WEEKS,
+)
+@click.option(
+    "-t",
+    "--target-address",
+    help="The original target address you sent the clawback to",
+    required=True,
+    type=str,
+)
+@click.option(
+    "-c",
+    "--coin-ids",
+    help="The coin IDs you want to claw back",
+    required=True,
+    multiple=True,
+    type=str,
+)
+@click.option(
+    "-wp",
+    "--wallet-rpc-port",
+    help="Set the port where the Wallet is hosting the RPC interface. See the rpc_port under wallet in config.yaml",
+    required=False,
+    type=int,
+    default=None,
+)
+@click.option(
+    "-f",
+    "--fingerprint",
+    help="Set the fingerprint to specify which wallet to use",
+    required=False,
+    type=int,
+    default=None,
+)
+@click.option(
+    "-np",
+    "--node-rpc-port",
+    help="Set the port where the Node is hosting the RPC interface. See the rpc_port under full_node in config.yaml",
+    required=False,
+    type=int,
+    default=None,
+)
+def clawback_coin_cmd(
+    timelock: int,
+    target_address: str,
+    coin_ids: List[str],
+    wallet_rpc_port: Optional[int] = None,
+    fingerprint: Optional[int] = None,
+    node_rpc_port: Optional[int] = None,
+):
+    """
+    \b
+    Clawback a transaction
+    """
+
+    async def do_command():
+        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
+
+        try:
+            cb_manager = CBManager(node_client, wallet_client)
+            await cb_manager.set_cb_info(timelock)
+            coin_id_bytes = [bytes32.from_hexstr(coin_id) for coin_id in coin_ids]
+            target_puzzle_hash = decode_puzzle_hash(target_address)
+            sb = await cb_manager.clawback_p2_merkle_coin_ids(coin_id_bytes, target_puzzle_hash)
+            res = await node_client.push_tx(sb)
+            assert res["success"]
+            print(res)
+
+        finally:
+            node_client.close()
+            wallet_client.close()
+            await node_client.await_closed()
+            await wallet_client.await_closed()
+
+    asyncio.get_event_loop().run_until_complete(do_command())
+
+
+@cli.command(
+    "claim",
+    short_help="Get details for all clawback coins for a given timelock",
+)
+@click.option(
+    "-t",
+    "--target-address",
+    help="The original target address of the clawback",
+    required=True,
+    type=str,
+)
+@click.option(
+    "-c",
+    "--coin-id",
+    help="The coin ID you want to claw back",
+    required=True,
+    type=str,
+)
+@click.option(
+    "-wp",
+    "--wallet-rpc-port",
+    help="Set the port where the Wallet is hosting the RPC interface. See the rpc_port under wallet in config.yaml",
+    required=False,
+    type=int,
+    default=None,
+)
+@click.option(
+    "-f",
+    "--fingerprint",
+    help="Set the fingerprint to specify which wallet to use",
+    required=False,
+    type=int,
+    default=None,
+)
+@click.option(
+    "-np",
+    "--node-rpc-port",
+    help="Set the port where the Node is hosting the RPC interface. See the rpc_port under full_node in config.yaml",
+    required=False,
+    type=int,
+    default=None,
+)
+def claim_coin_cmd(
+    target_address: str,
+    coin_id: str,
+    wallet_rpc_port: Optional[int] = None,
+    fingerprint: Optional[int] = None,
+    node_rpc_port: Optional[int] = None,
+):
+    """
+    \b
+    Clawback a transaction
+    """
+
+    async def do_command():
+        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
+
+        try:
+            cb_manager = CBManager(node_client, wallet_client)
+            target_puzzle_hash = decode_puzzle_hash(target_address)
+            coin_id_bytes = bytes32.from_hexstr(coin_id)
+            spend_bundle = await cb_manager.claim_p2_merkle(coin_id_bytes, target_puzzle_hash)
+            res = await node_client.push_tx(spend_bundle)
+            print(res)
+
         finally:
             node_client.close()
             wallet_client.close()

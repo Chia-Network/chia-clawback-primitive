@@ -7,6 +7,7 @@ from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.util.ints import uint32, uint64
 from chia.util.streamable import Streamable, streamable
 from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import puzzle_for_pk, solution_for_conditions
+from clvm.casts import int_from_bytes
 
 from src.drivers.merkle_utils import build_merkle_tree
 from src.load_clvm import load_clvm
@@ -82,19 +83,22 @@ def solve_cb_outer_with_conds(clawback_info: ClawbackInfo, conditions: List[Any]
     return validator_solution
 
 
-def solve_cb_outer_puzzle(clawback_info: ClawbackInfo, primaries: List[Dict[str, Any]]) -> Program:
+def solve_cb_outer_puzzle(
+    clawback_info: ClawbackInfo, primaries: List[Dict[str, Any]], change_amount: uint64
+) -> Program:
     conditions = [
         [51, construct_p2_merkle_puzzle(clawback_info, primary["puzzle_hash"]).get_tree_hash(), primary["amount"]]
         for primary in primaries
     ]
-    conditions.append([73, sum([primary["amount"] for primary in primaries])])
+    if change_amount > 0:
+        conditions.append([51, clawback_info.puzzle_hash(), change_amount])
+    conditions.append([73, change_amount + sum([primary["amount"] for primary in primaries])])
     inner_solution = solution_for_conditions(conditions)
 
     solution_data = [primary["puzzle_hash"] for primary in primaries]
+    solution_data.append(clawback_info.puzzle_hash())
     validator_solution = Program.to([[solution_data, inner_solution]])
     return validator_solution
-
-    # return Program.to([clawback_info.amount, clawback_info.inner_puzzle, inner_solution])
 
 
 def construct_claim_puzzle(clawback_info: ClawbackInfo, target_ph: bytes32) -> Program:
@@ -135,12 +139,26 @@ def solve_claw_puzzle(clawback_info: ClawbackInfo, primary: Dict[str, Any]) -> P
     return Program.to([inner_solution])
 
 
-def solve_p2_merkle_claim(clawback_info: ClawbackInfo, amount: uint64, target_ph: bytes32) -> Program:
-    claim_puz = construct_claim_puzzle(clawback_info, target_ph)
+def solve_p2_merkle_claim(
+    timelock: uint32, amount: uint64, target_ph: bytes32, cb_puzzle_hash: bytes32, sender_inner_puzzle: Program
+) -> Tuple[Program, Program]:
+    claim_puz = ACH_COMPLETION_MOD.curry(timelock, target_ph)
     claim_sol = solve_claim_puzzle(amount)
-    merkle_tree = calculate_merkle_tree(clawback_info, target_ph)
+    claw_puz = ACH_CLAWBACK_MOD.curry(cb_puzzle_hash, sender_inner_puzzle)
+    merkle_tree = build_merkle_tree([claw_puz.get_tree_hash(), claim_puz.get_tree_hash()])
     claim_proof = Program.to(merkle_tree[1][claim_puz.get_tree_hash()])
-    return Program.to([claim_puz, claim_proof, claim_sol])
+    p2_merkle_puz = P2_MERKLE_MOD.curry(merkle_tree[0])
+    p2_merkle_claim_sol = Program.to([claim_puz, claim_proof, claim_sol])
+    return p2_merkle_puz, p2_merkle_claim_sol
+
+
+def uncurry_clawback(puzzle: Program) -> Tuple[uint32, Program]:
+    uncurried = puzzle.uncurry()[1]
+    curried_vals = uncurried.at("ffrf").as_python()
+    assert len(curried_vals) == 7
+    timelock = uint32(int_from_bytes(curried_vals[-2]))
+    sender_inner_puzzle = uncurried.at("ffrfrrrrrrf")
+    return timelock, sender_inner_puzzle
 
 
 def solve_p2_merkle_claw(clawback_info: ClawbackInfo, primary: Dict[str, Any], target_ph: bytes32) -> Program:

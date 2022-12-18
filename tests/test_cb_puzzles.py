@@ -115,7 +115,7 @@ def test_clawback_xch():
     primaries = [{"puzzle_hash": ACS_PH, "amount": amt_1}, {"puzzle_hash": ACS_PH, "amount": amt_2}]
 
     cb_puz = cb_info.outer_puzzle()
-    cb_sol = solve_cb_outer_puzzle(cb_info, primaries)
+    cb_sol = solve_cb_outer_puzzle(cb_info, primaries, 0)
 
     cb_conds = cb_puz.run(cb_sol).as_python()
 
@@ -134,7 +134,7 @@ def test_clawback_xch():
     # Create claim and clawback solutions
     claw_primary = {"puzzle_hash": cb_info.outer_puzzle().get_tree_hash(), "amount": amt_1}
     claw_sol = solve_p2_merkle_claw(cb_info, claw_primary, ACS_PH)
-    claim_sol = solve_p2_merkle_claim(cb_info, amt_2, ACS_PH)
+    _, claim_sol = solve_p2_merkle_claim(cb_info.timelock, amt_2, ACS_PH, cb_info.puzzle_hash(), cb_info.inner_puzzle)
 
     # Run clawback
     claw_merkle_conds = merkle_puz.run(claw_sol)
@@ -157,7 +157,7 @@ def test_clawback_cat():
     primaries = [{"puzzle_hash": ACS_PH, "amount": amount}]
 
     cb_puz = cb_info.outer_puzzle()
-    cb_sol = solve_cb_outer_puzzle(cb_info, primaries)
+    cb_sol = solve_cb_outer_puzzle(cb_info, primaries, 0)
 
     merkle_puz = construct_p2_merkle_puzzle(cb_info, ACS_PH)
 
@@ -195,7 +195,7 @@ def test_clawback_cat():
 
     claw_primary = {"puzzle_hash": cb_puz.get_tree_hash(), "amount": 1000}
     claw_sol = solve_p2_merkle_claw(cb_info, claw_primary, ACS_PH)
-    claim_sol = solve_p2_merkle_claim(cb_info, 1000, ACS_PH)
+    _, claim_sol = solve_p2_merkle_claim(cb_info.timelock, 1000, ACS_PH, cb_info.puzzle_hash(), cb_info.inner_puzzle)
 
     merkle_cat_claw_sol = Program.to(
         [
@@ -243,7 +243,7 @@ def test_clawback_nft():
     primaries = [{"puzzle_hash": taker_p2_ph, "amount": amount}]
 
     cb_puz = cb_info.outer_puzzle()
-    cb_sol = solve_cb_outer_puzzle(cb_info, primaries)
+    cb_sol = solve_cb_outer_puzzle(cb_info, primaries, 0)
 
     merkle_puz = construct_p2_merkle_puzzle(cb_info, ACS_PH)
 

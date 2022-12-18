@@ -152,11 +152,11 @@ async def test_cb_clawback(
     wallet_id = 1
     amount = uint64(100000000)
     timelock = TWO_WEEKS
-    manager = CBManager(node_client, client_maker, timelock)
+    manager = CBManager(node_client, client_maker)
     ph_token = bytes32(token_bytes(32))
 
     # Create a Clawback Coin
-    cb_info = await manager.set_cb_info()
+    cb_info = await manager.set_cb_info(timelock)
 
     additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount}]
     tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
@@ -176,7 +176,7 @@ async def test_cb_clawback(
     merkle_coin = (await manager.get_p2_merkle_coins(taker_ph))[0]
 
     # clawback the p2_merkle
-    claw_sb = await manager.clawback_p2_merkle(merkle_coin, taker_ph)
+    claw_sb = await manager.clawback_p2_merkle([merkle_coin], taker_ph)
     # check we don't have a cb coin:
     cb_coins = await manager.get_cb_coins()
     assert not cb_coins
@@ -197,11 +197,11 @@ async def test_cb_claim(
     wallet_id = 1
     amount = uint64(100000000)
     timelock = TEN_SECONDS
-    manager = CBManager(node_client, client_maker, timelock)
+    manager = CBManager(node_client, client_maker)
     ph_token = bytes32(token_bytes(32))
 
     # Create a Clawback Coin
-    cb_info = await manager.set_cb_info()
+    cb_info = await manager.set_cb_info(timelock)
 
     additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount}]
     tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
@@ -219,7 +219,7 @@ async def test_cb_claim(
     merkle_coin = (await manager.get_p2_merkle_coins(taker_ph))[0]
 
     # claim the p2_merkle too early
-    claim_sb = await manager.claim_p2_merkle(merkle_coin, taker_ph)
+    claim_sb = await manager.claim_p2_merkle(merkle_coin.name(), taker_ph)
     with pytest.raises(ValueError) as e_info:
         await node_client.push_tx(claim_sb)
 
