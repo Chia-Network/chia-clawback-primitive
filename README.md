@@ -11,9 +11,11 @@ The purpose of clawback is to make sure that if you send coins to the wrong addr
 ## Setup
 ** NOTE: This package requires a synced node and wallet. **
 
-1. Clone this repository
+1. Clone this repository (and use validator branch for now)
 ```shell
-git clone https://github.com/Chia-Network/chia-clawback-primitive
+git clone https://github.com/Chia-Network/chia-clawback-primitive.git
+git checkout validator
+
 ```
 
 2. Setup and activate a virtual environment

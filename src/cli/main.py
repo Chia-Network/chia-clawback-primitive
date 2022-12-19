@@ -22,7 +22,7 @@ def monkey_patch_click() -> None:
 
 
 @click.group(
-    help="\n ClawBack Manager\n",
+    help="\n Clawback Primitive: Tooling to support clawbacks in Chia\n",
     context_settings=CONTEXT_SETTINGS,
 )
 @click.version_option(__version__)
@@ -32,7 +32,7 @@ def cli(ctx: click.Context) -> None:
 
 
 @cli.command(
-    "get-address",
+    "get_address",
     short_help="Get a clawback address",
 )
 @click.option(
@@ -75,7 +75,7 @@ def get_address_cmd(
 ):
     """
     \b
-    Get a clawback address
+    Get a clawback address from the connected wallet client
     """
 
     async def do_command():
@@ -96,7 +96,7 @@ def get_address_cmd(
 
 
 @cli.command(
-    "create-coin",
+    "create_coin",
     short_help="Send xch to a clawback coin",
 )
 @click.option(
@@ -195,7 +195,7 @@ def create_cb_cmd(
 
 
 @cli.command(
-    "get-my-coins",
+    "get_my_coins",
     short_help="Get details for all clawback coins for a given timelock",
 )
 @click.option(
@@ -238,7 +238,7 @@ def get_cb_coins_cmd(
 ):
     """
     \b
-    Create a transaction to fund a clawback coin
+    Get details for all clawback coins for a given timelock
     """
 
     async def do_command():
@@ -262,7 +262,7 @@ def get_cb_coins_cmd(
     asyncio.get_event_loop().run_until_complete(do_command())
 
 
-@cli.command("send-clawback", short_help="Send a clawback transaction")
+@cli.command("send_clawback", short_help="Send a clawback transaction")
 @click.option(
     "-l",
     "--timelock",
@@ -328,7 +328,7 @@ def send_clawback_cmd(
 ):
     """
     \b
-    Create a transaction to fund a clawback coin
+    Send a clawback transaction to the intermediate puzzle
     """
 
     async def do_command():
@@ -362,7 +362,7 @@ def send_clawback_cmd(
 
 @cli.command(
     "clawback",
-    short_help="Get details for all clawback coins for a given timelock",
+    short_help="Clawback a previously sent transaction",
 )
 @click.option(
     "-l",
@@ -382,7 +382,7 @@ def send_clawback_cmd(
 @click.option(
     "-c",
     "--coin-ids",
-    help="The coin IDs you want to claw back",
+    help="The coin IDs you want to claw back (supports multiple use)",
     required=True,
     multiple=True,
     type=str,
@@ -449,7 +449,7 @@ def clawback_coin_cmd(
                 sb = cb_spend
             res = await node_client.push_tx(sb)
             assert res["success"]
-            print(res)
+            print("Successfully clawed back coin(s): {}".format(coin_ids))
 
         finally:
             node_client.close()
@@ -462,7 +462,7 @@ def clawback_coin_cmd(
 
 @cli.command(
     "claim",
-    short_help="Get details for all clawback coins for a given timelock",
+    short_help="Claim a balance after the timelock has passed",
 )
 @click.option(
     "-t",
@@ -520,7 +520,7 @@ def claim_coin_cmd(
 ):
     """
     \b
-    Clawback a transaction
+    Claim an intermediate coin after the timelock has passed
     """
 
     async def do_command():
@@ -537,7 +537,8 @@ def claim_coin_cmd(
             else:
                 sb = cb_spend
             res = await node_client.push_tx(sb)
-            print(res)
+            assert res["success"]
+            print("Successfully claimed coin: {}".format(coin_id))
 
         finally:
             node_client.close()
