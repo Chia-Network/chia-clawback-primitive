@@ -134,10 +134,11 @@ def solve_claim_puzzle(amount: uint64) -> Program:
     return Program.to([amount])
 
 
-def solve_claw_puzzle(clawback_info: ClawbackInfo, primary: Dict[str, Any]) -> Program:
+def solve_claw_puzzle(clawback_info: ClawbackInfo, primary: Dict[str, Any], fee: uint64 = uint64(0)) -> Program:
     conditions = [[51, primary["puzzle_hash"], primary["amount"]]]
+    if fee > 0:
+        conditions.append([52, fee])
     inner_solution = solution_for_conditions(conditions)
-    # return Program.to([primary["amount"], clawback_info.inner_puzzle, inner_solution])
     return Program.to([inner_solution])
 
 
@@ -163,9 +164,11 @@ def uncurry_clawback(puzzle: Program) -> Tuple[uint32, Program]:
     return timelock, sender_inner_puzzle
 
 
-def solve_p2_merkle_claw(clawback_info: ClawbackInfo, primary: Dict[str, Any], target_ph: bytes32) -> Program:
+def solve_p2_merkle_claw(
+    clawback_info: ClawbackInfo, primary: Dict[str, Any], target_ph: bytes32, fee: uint64 = uint64(0)
+) -> Program:
     claw_puz = construct_clawback_puzzle(clawback_info)
-    claw_sol = solve_claw_puzzle(clawback_info, primary)
+    claw_sol = solve_claw_puzzle(clawback_info, primary, fee)
     claw_puz.run(claw_sol)
     merkle_tree = calculate_merkle_tree(clawback_info, target_ph)
     claw_proof = Program.to(merkle_tree[1][claw_puz.get_tree_hash()])

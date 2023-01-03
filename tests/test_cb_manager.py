@@ -177,7 +177,7 @@ async def test_cb_clawback(
     merkle_coin = (await manager.get_p2_merkle_coins(taker_ph))[0]
 
     # clawback the p2_merkle
-    claw_sb = await manager.clawback_p2_merkle([merkle_coin], taker_ph)
+    claw_sb = await manager.clawback_p2_merkle([merkle_coin], taker_ph, fee)
     # check we don't have a cb coin:
     cb_coins = await manager.get_cb_coins()
     assert not cb_coins
@@ -187,6 +187,7 @@ async def test_cb_clawback(
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
     cb_coins = await manager.get_cb_coins()
     assert len(cb_coins) == 1
+    assert cb_coins[0].coin.amount == amount - (2 * fee)
 
 
 @pytest.mark.asyncio
