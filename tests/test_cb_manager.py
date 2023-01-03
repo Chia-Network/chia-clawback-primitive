@@ -201,6 +201,7 @@ async def test_cb_claim(
     timelock = TEN_SECONDS
     manager = CBManager(node_client, client_maker)
     ph_token = bytes32(token_bytes(32))
+    fee = uint64(10)
 
     # Create a Clawback Coin
     cb_info = await manager.set_cb_info(timelock)
@@ -215,13 +216,13 @@ async def test_cb_claim(
 
     # send the cb coin to p2_merkle
     taker_ph = await wallet_taker.get_new_puzzlehash()
-    p2_merkle_sb = await manager.send_cb_coin(amount, taker_ph)
+    p2_merkle_sb = await manager.send_cb_coin(amount, taker_ph, fee)
     await node_client.push_tx(p2_merkle_sb)
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
     merkle_coin = (await manager.get_p2_merkle_coins(taker_ph))[0]
 
     # claim the p2_merkle too early
-    claim_sb = await manager.claim_p2_merkle(merkle_coin.name(), taker_ph)
+    claim_sb = await manager.claim_p2_merkle(merkle_coin.name(), taker_ph, fee)
     with pytest.raises(ValueError) as e_info:
         await node_client.push_tx(claim_sb)
 
@@ -238,3 +239,4 @@ async def test_cb_claim(
 
     taker_coins = await node_client.get_coin_records_by_puzzle_hash(taker_ph, include_spent_coins=False)
     assert len(taker_coins) == 1
+    assert taker_coins[0].coin.amount == amount - (2 * fee)

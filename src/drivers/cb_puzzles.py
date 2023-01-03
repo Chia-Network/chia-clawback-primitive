@@ -130,8 +130,8 @@ def construct_p2_merkle_puzzle(clawback_info: ClawbackInfo, target_ph: bytes32) 
     return P2_MERKLE_MOD.curry(calculate_merkle_tree(clawback_info, target_ph)[0])
 
 
-def solve_claim_puzzle(amount: uint64) -> Program:
-    return Program.to([amount])
+def solve_claim_puzzle(amount: uint64, fee: uint64 = uint64(0)) -> Program:
+    return Program.to([amount - fee, fee])
 
 
 def solve_claw_puzzle(clawback_info: ClawbackInfo, primary: Dict[str, Any], fee: uint64 = uint64(0)) -> Program:
@@ -143,10 +143,15 @@ def solve_claw_puzzle(clawback_info: ClawbackInfo, primary: Dict[str, Any], fee:
 
 
 def solve_p2_merkle_claim(
-    timelock: uint32, amount: uint64, target_ph: bytes32, cb_puzzle_hash: bytes32, sender_inner_puzzle: Program
+    timelock: uint32,
+    amount: uint64,
+    target_ph: bytes32,
+    cb_puzzle_hash: bytes32,
+    sender_inner_puzzle: Program,
+    fee: uint64 = uint64(0),
 ) -> Tuple[Program, Program]:
     claim_puz = ACH_COMPLETION_MOD.curry(timelock, target_ph)
-    claim_sol = solve_claim_puzzle(amount)
+    claim_sol = solve_claim_puzzle(amount, fee)
     claw_puz = ACH_CLAWBACK_MOD.curry(cb_puzzle_hash, sender_inner_puzzle)
     merkle_tree = build_merkle_tree([claw_puz.get_tree_hash(), claim_puz.get_tree_hash()])
     claim_proof = Program.to(merkle_tree[1][claim_puz.get_tree_hash()])
