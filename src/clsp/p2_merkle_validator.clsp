@@ -14,6 +14,8 @@
   conditions
   )
 
+  ;; solution_data is a list of the target puzzle hashes used to validate the CREATE_COIN puzzlehashes
+
   (include condition_codes.clib)
   (include curry_and_treehash.clib)
   (include utility_macros.clib)
@@ -94,7 +96,7 @@
     )
     target_ph
     )
-    
+
     (curry_merkle P2_MERKLE_HASH
        (merkleize
 	 (curry_claw ACH_CLAW_HASH
@@ -112,7 +114,7 @@
       (amount condition)
       (if (= (puzhash condition) (my_cb_puzhash CURRIED_DATA))
         (amount condition)
-        (x "CREATE_COIN puzhash is not a valid p2_merkle or cb_outer")  
+        (x "CREATE_COIN puzhash is not a valid p2_merkle or cb_outer")
       )
     )
   )
@@ -125,7 +127,13 @@
 	  (validate_cc_condition CURRIED_DATA (f solution_data) (f conditions))
 	  (validate_cc_conditions_and_get_amount CURRIED_DATA (r solution_data) (r conditions))
 	)
-	(validate_cc_conditions_and_get_amount CURRIED_DATA solution_data (r conditions))
+	(if (= (opcode (f conditions)) RESERVE_FEE)
+	  (+
+	    (f (r (f conditions)))
+	    (validate_cc_conditions_and_get_amount CURRIED_DATA solution_data (r conditions))
+	  )
+	  (validate_cc_conditions_and_get_amount CURRIED_DATA solution_data (r conditions))
+	)
       )
       ()
     )
@@ -158,5 +166,5 @@
 
 
   (main CURRIED_DATA solution_data conditions)
-  
+
 )

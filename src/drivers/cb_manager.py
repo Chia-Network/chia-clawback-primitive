@@ -121,7 +121,7 @@ class CBManager:
         assert AugSchemeMPL.aggregate_verify(pk_list, msg_list, aggsig)
         return SpendBundle(coin_spends, aggsig)
 
-    async def send_cb_coin(self, amount: uint64, target_puzzle_hash: bytes32) -> SpendBundle:
+    async def send_cb_coin(self, amount: uint64, target_puzzle_hash: bytes32, fee: uint64 = uint64(0)) -> SpendBundle:
         coins = await self.select_coins(amount)
         change = uint64(sum([coin.amount for coin in coins]) - amount)
         coin_spends = []
@@ -131,9 +131,9 @@ class CBManager:
             if total_amount >= amount:
                 # this is the last coin to spend
                 primaries = [
-                    {"puzzle_hash": target_puzzle_hash, "amount": coin.amount - change},
+                    {"puzzle_hash": target_puzzle_hash, "amount": coin.amount - change - fee},
                 ]
-                cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, change)
+                cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, change, fee)
             else:
                 primaries = [
                     {"puzzle_hash": target_puzzle_hash, "amount": coin.amount},

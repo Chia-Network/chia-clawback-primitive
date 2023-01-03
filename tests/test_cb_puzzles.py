@@ -58,9 +58,10 @@ def test_p2_merkle_validator():
 
     p2_merkle_conds = [
         [51, p2_merkle_ph, 100],
-        [73, 800],
         [51, p2_merkle_ph, 300],
         [51, validator_puzzle.get_tree_hash(), 400],
+        [52, 10],
+        [73, 810],
     ]
     solution_data = [ACS_PH, ACS_PH, cb_info.inner_puzzle.get_tree_hash()]
 

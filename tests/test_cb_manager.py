@@ -154,6 +154,7 @@ async def test_cb_clawback(
     timelock = TWO_WEEKS
     manager = CBManager(node_client, client_maker)
     ph_token = bytes32(token_bytes(32))
+    fee = uint64(10)
 
     # Create a Clawback Coin
     cb_info = await manager.set_cb_info(timelock)
@@ -169,7 +170,7 @@ async def test_cb_clawback(
 
     # send the cb coin to p2_merkle
     taker_ph = await wallet_taker.get_new_puzzlehash()
-    p2_merkle_sb = await manager.send_cb_coin(amount, taker_ph)
+    p2_merkle_sb = await manager.send_cb_coin(amount, taker_ph, fee)
     await node_client.push_tx(p2_merkle_sb)
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
