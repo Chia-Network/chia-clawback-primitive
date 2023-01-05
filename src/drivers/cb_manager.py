@@ -192,9 +192,7 @@ class CBManager:
         coins = [cr.coin for cr in coin_recs]
         return await self.clawback_p2_merkle(coins, target_puzzle_hash)
 
-    async def claim_p2_merkle(
-        self, coin_id: bytes32, target_puzzle_hash: bytes32, fee: uint64 = uint64(0)
-    ) -> SpendBundle:
+    async def claim_p2_merkle(self, coin_id: bytes32, target_puzzle_hash: bytes32) -> SpendBundle:
         coin_rec = await self.node_client.get_coin_record_by_name(coin_id)
         assert isinstance(coin_rec, CoinRecord)
         coin = coin_rec.coin
@@ -208,7 +206,7 @@ class CBManager:
         assert isinstance(parent_coin_rec, CoinRecord)
         cb_puzzle_hash = parent_coin_rec.coin.puzzle_hash
         p2_merkle_puz, claim_sol = solve_p2_merkle_claim(
-            timelock, uint64(coin.amount), target_puzzle_hash, cb_puzzle_hash, sender_inner_puzzle, fee
+            timelock, uint64(coin.amount), target_puzzle_hash, cb_puzzle_hash, sender_inner_puzzle
         )
         coin_spend = CoinSpend(coin, p2_merkle_puz, claim_sol)
         spend_bundle = SpendBundle([coin_spend], G2Element())
