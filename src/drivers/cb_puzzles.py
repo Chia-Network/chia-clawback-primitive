@@ -84,12 +84,15 @@ def solve_cb_outer_with_conds(clawback_info: ClawbackInfo, conditions: List[Any]
 
 
 def solve_cb_outer_puzzle(
-    clawback_info: ClawbackInfo, primaries: List[Dict[str, Any]], change_amount: uint64, fee: uint64 = uint64(0)
+    clawback_info: ClawbackInfo, primaries: List, change_amount: uint64, fee: uint64 = uint64(0)
 ) -> Program:
-    conditions = [
-        [51, construct_p2_merkle_puzzle(clawback_info, primary["puzzle_hash"]).get_tree_hash(), primary["amount"]]
-        for primary in primaries
-    ]
+    if primaries:
+        conditions = [
+            [51, construct_p2_merkle_puzzle(clawback_info, primary["puzzle_hash"]).get_tree_hash(), primary["amount"]]
+            for primary in primaries
+        ]
+    else:
+        conditions = []
     if change_amount > 0:
         conditions.append([51, clawback_info.puzzle_hash(), change_amount])
     if fee > 0:
@@ -135,7 +138,10 @@ def solve_claim_puzzle(amount: uint64, fee: uint64 = uint64(0)) -> Program:
 
 
 def solve_claw_puzzle(clawback_info: ClawbackInfo, primary: Dict[str, Any], fee: uint64 = uint64(0)) -> Program:
-    conditions = [[51, primary["puzzle_hash"], primary["amount"]]]
+    if primary:
+        conditions = [[51, primary["puzzle_hash"], primary["amount"]]]
+    else:
+        conditions = []
     if fee > 0:
         conditions.append([52, fee])
     inner_solution = solution_for_conditions(conditions)

@@ -240,3 +240,64 @@ async def test_cb_claim(
     taker_coins = await node_client.get_coin_records_by_puzzle_hash(taker_ph, include_spent_coins=False)
     assert len(taker_coins) == 1
     assert taker_coins[0].coin.amount == amount - (2 * fee)
+
+
+@pytest.mark.asyncio
+async def test_cb_multiple_coins(
+    tmp_path: Path,
+    maker_taker_rpc: Tuple[Wallet, WalletRpcClient, Wallet, WalletRpcClient, FullNodeSimulator, FullNodeRpcClient],
+) -> None:
+    wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, node_client = maker_taker_rpc
+    wallet_id = 1
+    amount_1 = uint64(500000)
+    amount_2 = uint64(500)
+    fee = uint64(1000)
+    send_amount = uint64(499400)
+    timelock = TWO_WEEKS
+    manager = CBManager(node_client, client_maker)
+    ph_token = bytes32(token_bytes(32))
+
+    # Create a Clawback Coin
+    cb_info = await manager.set_cb_info(timelock)
+
+    # First Coin
+    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount_1}]
+    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
+    assert isinstance(tx.spend_bundle, SpendBundle)
+    await node_client.push_tx(tx.spend_bundle)
+    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+
+    # Second coin
+    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount_2}]
+    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
+    assert isinstance(tx.spend_bundle, SpendBundle)
+    await node_client.push_tx(tx.spend_bundle)
+    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+
+    # send 2 cb coins to p2_merkle
+    taker_ph = await wallet_taker.get_new_puzzlehash()
+    p2_merkle_sb = await manager.send_cb_coin(send_amount, taker_ph, fee)
+
+    await node_client.push_tx(p2_merkle_sb)
+    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+    merkle_coins = await manager.get_p2_merkle_coins(taker_ph)
+    assert sum([coin.amount for coin in merkle_coins]) == send_amount
+
+    # check the change coin exists:
+    cb_coins = await manager.get_cb_coins()
+    assert len(cb_coins) == 1
+    cb_amount_left = amount_1 + amount_2 - send_amount - fee
+    assert cb_coins[0].coin.amount == cb_amount_left
+
+    # clawback the p2_merkle coins
+    claw_sb = await manager.clawback_p2_merkle(merkle_coins, taker_ph, fee)
+    # breakpoint()
+
+    # push the spend and check we have a returned cb coin
+    await node_client.push_tx(claw_sb)
+    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+    cb_coins = await manager.get_cb_coins()
+    assert sum([cr.coin.amount for cr in cb_coins]) == send_amount - fee + cb_amount_left

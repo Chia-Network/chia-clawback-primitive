@@ -122,23 +122,37 @@ class CBManager:
         return SpendBundle(coin_spends, aggsig)
 
     async def send_cb_coin(self, amount: uint64, target_puzzle_hash: bytes32, fee: uint64 = uint64(0)) -> SpendBundle:
-        coins = await self.select_coins(amount)
-        change = uint64(sum([coin.amount for coin in coins]) - amount)
+        coins = await self.select_coins(uint64(amount + fee))
+        # change = uint64(sum([coin.amount for coin in coins]) - amount)
         coin_spends = []
-        total_amount = 0
+        amount_remaining: uint64 = amount
+        fee_remaining: uint64 = fee
+
         for coin in coins:
-            total_amount += coin.amount
-            if total_amount >= amount:
-                # this is the last coin to spend
-                primaries = [
-                    {"puzzle_hash": target_puzzle_hash, "amount": coin.amount - change - fee},
-                ]
-                cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, change, fee)
+            if coin.amount <= fee_remaining:
+                # if the fee is greater than the coin amount, allocate it all to fee
+                primaries: List = []
+                change = uint64(0)
+                cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, change, fee_remaining)
+                fee_remaining = uint64(fee_remaining - coin.amount)
             else:
-                primaries = [
-                    {"puzzle_hash": target_puzzle_hash, "amount": coin.amount},
-                ]
-                cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, uint64(0))
+                # otherwise take the fee out and try to spend the rest of the amount remaining
+                spend_amount = fee_remaining + amount_remaining
+                if spend_amount <= coin.amount:
+                    # the rest of the amount (and fee) can be spent by the current coin
+                    change = uint64(coin.amount - spend_amount)
+                    primaries = [{"puzzle_hash": target_puzzle_hash, "amount": amount_remaining}]
+                    cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, change, fee_remaining)
+                    fee_remaining = uint64(0)
+                    amount_remaining = uint64(0)
+                else:
+                    # spend the full coin amount (with needed fee) and updated amount_remaining
+                    amount_to_spend = uint64(coin.amount - fee_remaining)
+                    primaries = [{"puzzle_hash": target_puzzle_hash, "amount": amount_to_spend}]
+                    change = uint64(0)
+                    cb_solution = solve_cb_outer_puzzle(self.cb_info, primaries, change, fee_remaining)
+                    fee_remaining = uint64(0)
+                    amount_remaining = uint64(amount_remaining - amount_to_spend)
             coin_spends.append(CoinSpend(coin, self.cb_info.outer_puzzle(), cb_solution))
         spend_bundle = await self.sign_coin_spends(coin_spends)
         return spend_bundle
@@ -152,16 +166,23 @@ class CBManager:
         self, coins: List[Coin], target_puzzle_hash: bytes32, fee: uint64 = uint64(0)
     ) -> SpendBundle:
         p2_merkle_puz = construct_p2_merkle_puzzle(self.cb_info, target_puzzle_hash)
+        coins.sort(key=lambda x: x.amount, reverse=True)
         coin_spends = []
-        first = True
+        fee_remaining = fee
+        # first = True
         for coin in coins:
-            if first:
+            if fee_remaining >= coin.amount:
                 claw_primary = {"puzzle_hash": self.cb_info.outer_puzzle().get_tree_hash(), "amount": coin.amount - fee}
-                claw_sol = solve_p2_merkle_claw(self.cb_info, claw_primary, target_puzzle_hash, fee)
-                first = False
+                claw_primary = {}
+                claw_sol = solve_p2_merkle_claw(self.cb_info, claw_primary, target_puzzle_hash, uint64(coin.amount))
+                fee_remaining = uint64(fee_remaining - coin.amount)
             else:
-                claw_primary = {"puzzle_hash": self.cb_info.outer_puzzle().get_tree_hash(), "amount": coin.amount}
-                claw_sol = solve_p2_merkle_claw(self.cb_info, claw_primary, target_puzzle_hash)
+                claw_primary = {
+                    "puzzle_hash": self.cb_info.outer_puzzle().get_tree_hash(),
+                    "amount": coin.amount - fee_remaining,
+                }
+                claw_sol = solve_p2_merkle_claw(self.cb_info, claw_primary, target_puzzle_hash, fee_remaining)
+                fee_remaining = uint64(0)
             coin_spends.append(CoinSpend(coin, p2_merkle_puz, claw_sol))
         spend_bundle = await self.sign_coin_spends(coin_spends)
         return spend_bundle
