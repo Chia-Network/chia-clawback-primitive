@@ -4,6 +4,7 @@ from blspy import AugSchemeMPL, G1Element, G2Element, PrivateKey
 from chia.consensus.default_constants import DEFAULT_CONSTANTS
 from chia.rpc.full_node_rpc_client import FullNodeRpcClient
 from chia.rpc.wallet_rpc_client import WalletRpcClient
+from chia.types.announcement import Announcement
 from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.coin_record import CoinRecord
@@ -187,10 +188,10 @@ class CBManager:
         spend_bundle = await self.sign_coin_spends(coin_spends)
         return spend_bundle
 
-    async def clawback_p2_merkle_coin_ids(self, coin_ids: List[bytes32], target_puzzle_hash: bytes32) -> SpendBundle:
-        coin_recs = await self.node_client.get_coin_records_by_names(coin_ids)
-        coins = [cr.coin for cr in coin_recs]
-        return await self.clawback_p2_merkle(coins, target_puzzle_hash)
+    # async def clawback_p2_merkle_coin_ids(self, coin_ids: List[bytes32], target_puzzle_hash: bytes32) -> SpendBundle:
+    #     coin_recs = await self.node_client.get_coin_records_by_names(coin_ids)
+    #     coins = [cr.coin for cr in coin_recs]
+    #     return await self.clawback_p2_merkle(coins, target_puzzle_hash)
 
     async def claim_p2_merkle(self, coin_id: bytes32, target_puzzle_hash: bytes32) -> SpendBundle:
         coin_rec = await self.node_client.get_coin_record_by_name(coin_id)
@@ -212,10 +213,25 @@ class CBManager:
         spend_bundle = SpendBundle([coin_spend], G2Element())
         return spend_bundle
 
-    async def create_fee_spend(self, fee: uint64) -> SpendBundle:
-        spendable_coins = await self.wallet_client.get_spendable_coins(1, min_coin_amount=fee)
+    async def claim_p2_merkle_multiple(
+        self, coin_ids: List[bytes32], target_puzzle_hash: bytes32, fee: uint64 = uint64(0), fee_wallet_id: int = 1
+    ) -> SpendBundle:
+        spend_bundles = []
+        announcements = []
+        for coin_id in coin_ids:
+            claim_spend = await self.claim_p2_merkle(coin_id, target_puzzle_hash)
+            spend_bundles.append(claim_spend)
+            announcements.append(Announcement(coin_id, b""))
+        fee_spend = await self.create_fee_spend(fee, announcements, fee_wallet_id)
+        spend_bundles.append(fee_spend)
+        return SpendBundle.aggregate(spend_bundles)
+
+    async def create_fee_spend(self, fee: uint64, announcements: List[Announcement], fee_wallet_id: int) -> SpendBundle:
+        spendable_coins = await self.wallet_client.get_spendable_coins(fee_wallet_id, min_coin_amount=fee)
         coin = spendable_coins[0][0].coin
         addition = {"puzzle_hash": coin.puzzle_hash, "amount": coin.amount - fee}
-        fee_tx = await self.wallet_client.create_signed_transaction([addition], coins=[coin], fee=fee)
+        fee_tx = await self.wallet_client.create_signed_transaction(
+            [addition], coins=[coin], coin_announcements=announcements, fee=fee
+        )
         assert isinstance(fee_tx.spend_bundle, SpendBundle)
         return fee_tx.spend_bundle
