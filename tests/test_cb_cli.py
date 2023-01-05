@@ -11,6 +11,12 @@ from click.testing import CliRunner
 
 from src.cli.main import cli
 
+# These tests require the external simulator and wallet
+#
+# cdv sim autofarm on
+# chia start simulator
+# chia start wallet
+
 
 def test_cli_claw(tmp_path: Path) -> None:
     amount_1 = 1000
@@ -20,10 +26,10 @@ def test_cli_claw(tmp_path: Path) -> None:
     target_address = encode_puzzle_hash(bytes32(token_bytes(32)), "xch")
     runner = CliRunner()
     with runner.isolated_filesystem():
-        address = runner.invoke(cli, ["get-address"])
-        cb_coin = runner.invoke(cli, ["create-coin", "-a", str(amount_1), "-w", str(wallet_id), "-d", str(fee)])
-        cb_coins = runner.invoke(cli, ["get-my-coins"])
-        cb_tx = runner.invoke(cli, ["send-clawback", "-a", str(amount_2), "-t", target_address, "-d", str(fee)])
+        address = runner.invoke(cli, ["get_address"])
+        cb_coin = runner.invoke(cli, ["create_coin", "-a", str(amount_1), "-w", str(wallet_id)])
+        cb_coins = runner.invoke(cli, ["get_my_coins"])
+        cb_tx = runner.invoke(cli, ["send_clawback", "-a", str(amount_2), "-t", target_address, "-d", str(fee)])
         created_coins = cb_tx.stdout.split("\n")[1:-1]
         id_opts: List[str] = []
         for cc in created_coins:
@@ -45,14 +51,14 @@ def test_cli_claim(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
         cb_coin = runner.invoke(
-            cli, ["create-coin", "-l", str(timelock), "-a", str(amount_1), "-w", str(wallet_id), "-d", str(fee)]
+            cli, ["create_coin", "-l", str(timelock), "-a", str(amount_1), "-w", str(wallet_id), "-d", str(fee)]
         )
         cb_tx = runner.invoke(
-            cli, ["send-clawback", "-l", str(timelock), "-a", str(amount_2), "-t", target_address, "-d", str(fee)]
+            cli, ["send_clawback", "-l", str(timelock), "-a", str(amount_2), "-t", target_address, "-d", str(fee)]
         )
         time.sleep(10)
         # make another coin so we push another block
-        cb_coin_2 = runner.invoke(cli, ["create-coin", "-a", str(amount_2), "-w", str(wallet_id), "-d", str(fee)])
+        cb_coin_2 = runner.invoke(cli, ["create_coin", "-a", str(amount_2), "-w", str(wallet_id), "-d", str(fee)])
         created_coins = cb_tx.stdout.split("\n")[1:-1]
         id_opts: List[str] = []
         for cc in created_coins:

@@ -68,7 +68,7 @@ class CBManager:
     async def create_cb_coin(
         self, amount: uint64, address: str, wallet_id: int = 1, fee: uint64 = uint64(0)
     ) -> TransactionRecord:
-        tx = await self.wallet_client.send_transaction(str(wallet_id), amount, address, fee)
+        tx = await self.wallet_client.send_transaction(wallet_id, amount, address, fee)
         return tx
 
     async def get_cb_coin_by_id(self, coin_id: bytes32) -> Optional[CoinRecord]:
@@ -188,10 +188,12 @@ class CBManager:
         spend_bundle = await self.sign_coin_spends(coin_spends)
         return spend_bundle
 
-    # async def clawback_p2_merkle_coin_ids(self, coin_ids: List[bytes32], target_puzzle_hash: bytes32) -> SpendBundle:
-    #     coin_recs = await self.node_client.get_coin_records_by_names(coin_ids)
-    #     coins = [cr.coin for cr in coin_recs]
-    #     return await self.clawback_p2_merkle(coins, target_puzzle_hash)
+    async def clawback_p2_merkle_coin_ids(
+        self, coin_ids: List[bytes32], target_puzzle_hash: bytes32, fee: uint64 = uint64(0)
+    ) -> SpendBundle:
+        coin_recs = await self.node_client.get_coin_records_by_names(coin_ids)
+        coins = [cr.coin for cr in coin_recs]
+        return await self.clawback_p2_merkle(coins, target_puzzle_hash, fee)
 
     async def claim_p2_merkle(self, coin_id: bytes32, target_puzzle_hash: bytes32) -> SpendBundle:
         coin_rec = await self.node_client.get_coin_record_by_name(coin_id)

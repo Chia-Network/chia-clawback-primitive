@@ -348,7 +348,7 @@ async def test_cb_claim_multiple_coins(
     assert sum([coin.amount for coin in merkle_coins]) == send_amount
 
     taker_manager = CBManager(node_client, client_taker)
-    bal = await client_taker.get_wallet_balance(wallet_id="1")
+    bal = await client_taker.get_wallet_balance(wallet_id=1)
     taker_start_bal = bal["confirmed_wallet_balance"]
     claim_sb = await taker_manager.claim_p2_merkle_multiple(
         [coin.name() for coin in merkle_coins], taker_ph, fee, fee_wallet_id=1
@@ -367,6 +367,6 @@ async def test_cb_claim_multiple_coins(
     taker_coins = await node_client.get_coin_records_by_puzzle_hash(taker_ph, include_spent_coins=False)
     assert sum([cr.coin.amount for cr in taker_coins]) == send_amount
 
-    bal = await client_taker.get_wallet_balance(wallet_id="1")
+    bal = await client_taker.get_wallet_balance(wallet_id=1)
     taker_end_bal = bal["confirmed_wallet_balance"]
     assert taker_end_bal == taker_start_bal + send_amount - fee
