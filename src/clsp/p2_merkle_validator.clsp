@@ -10,11 +10,9 @@
       INNER_PUZ
     )
   )
-  solution_data
+  solution_data ;; list of the target puzzle hashes used to validate the CREATE_COIN puzzlehashes
   conditions
   )
-
-  ;; solution_data is a list of the target puzzle hashes used to validate the CREATE_COIN puzzlehashes
 
   (include condition_codes.clib)
   (include curry_and_treehash.clib)
@@ -83,18 +81,18 @@
   )
 
   (defun-inline create_p2_merkle_puzhash (
-    (@ CURRIED_DATA
-      (
-	VALIDATOR_MOD_HASH
-	P2_MERKLE_VALIDATOR_MOD
-	ACH_CLAW_HASH
-	ACH_CLAIM_HASH
-	P2_MERKLE_HASH
-	TIMELOCK
-	INNER_PUZ
+      (@ CURRIED_DATA
+	(
+	  VALIDATOR_MOD_HASH
+	  P2_MERKLE_VALIDATOR_MOD
+	  ACH_CLAW_HASH
+	  ACH_CLAIM_HASH
+	  P2_MERKLE_HASH
+	  TIMELOCK
+	  INNER_PUZ
+	)
       )
-    )
-    target_ph
+      target_ph
     )
 
     (curry_merkle P2_MERKLE_HASH
@@ -109,30 +107,30 @@
   )
 
 
-  (defun validate_cc_condition (CURRIED_DATA target_ph condition)
+  (defun validate_cc_condition (CURRIED_DATA cb_puzhash target_ph condition)
     (if (= (puzhash condition) (create_p2_merkle_puzhash CURRIED_DATA target_ph))
       (amount condition)
-      (if (= (puzhash condition) (my_cb_puzhash CURRIED_DATA))
+      (if (= (puzhash condition) cb_puzhash)
         (amount condition)
-        (x "CREATE_COIN puzhash is not a valid p2_merkle or cb_outer")
+        (x)
       )
     )
   )
 
 
-  (defun validate_cc_conditions_and_get_amount (CURRIED_DATA solution_data conditions)
+  (defun validate_cc_conditions_and_get_amount (CURRIED_DATA cb_puzhash solution_data conditions)
     (if conditions
       (if (= (opcode (f conditions)) CREATE_COIN)
 	(+
-	  (validate_cc_condition CURRIED_DATA (f solution_data) (f conditions))
-	  (validate_cc_conditions_and_get_amount CURRIED_DATA (r solution_data) (r conditions))
+	  (validate_cc_condition CURRIED_DATA cb_puzhash (f solution_data) (f conditions))
+	  (validate_cc_conditions_and_get_amount CURRIED_DATA cb_puzhash (r solution_data) (r conditions))
 	)
 	(if (= (opcode (f conditions)) RESERVE_FEE)
 	  (+
 	    (f (r (f conditions)))
-	    (validate_cc_conditions_and_get_amount CURRIED_DATA solution_data (r conditions))
+	    (validate_cc_conditions_and_get_amount CURRIED_DATA cb_puzhash solution_data (r conditions))
 	  )
-	  (validate_cc_conditions_and_get_amount CURRIED_DATA solution_data (r conditions))
+	  (validate_cc_conditions_and_get_amount CURRIED_DATA cb_puzhash solution_data (r conditions))
 	)
       )
       ()
@@ -148,23 +146,20 @@
 	)
 	(validate_assert_my_amount (r conditions) calculated_amount)
       )
-      (x "ASSERT_MY_AMOUNT not found")
+      (x)
     )
   )
 
 
-  (defun main (CURRIED_DATA solution_data conditions)
-    (validate_assert_my_amount
+  ;; MAIN
+  (validate_assert_my_amount
+    conditions
+    (validate_cc_conditions_and_get_amount
+      CURRIED_DATA
+      (my_cb_puzhash CURRIED_DATA)
+      solution_data
       conditions
-      (validate_cc_conditions_and_get_amount
-        CURRIED_DATA
-	solution_data
-	conditions
-      )
     )
   )
-
-
-  (main CURRIED_DATA solution_data conditions)
 
 )
