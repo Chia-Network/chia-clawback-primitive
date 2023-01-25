@@ -74,3 +74,24 @@ This is just a p2_puzzle_hash where the curried puzhash is dictated by the type 
 #### WALLET_WRAPPER
 Coins controlled by clawback wallets have a wrapper puzzle that enforces the p2_merkle. The wallet also has to know a pubblic key for the cold-storage wallet, which it will use to create the clawback puzzlehash should the owner want to reclaim the coins.
 
+
+### Description of the clawback process
+#### User creates a recoverable spend from a standard wallet
+1. `A` takes a puzzle hash for the recipient's wallet `B`
+2. creates the timelock condition `(ASSERT_SECONDS_RELATIVE t)` for some time `t`, and curries this along with `B`'s puzzle hash into the `augmented_condition` puzzle
+3. creates the `p2_puzzlehash` puzzle by currying a puzzle hash from their own wallet (either hot wallet or cold wallet)
+4. creates the `p2_merkle` puzzle by calculating the merkle root for the `augmented_condition` and `p2_puzzlehash` puzzles.
+5. Create a spend from the wallet to the curried `p2_merkle` puzzle
+
+#### If the user recovers the spend
+1. `A` decides to reclaim the funds sent to the `p2_merkle` puzzle
+2. Recreates the inner puzzle which is curried into `p2_puzzlehash`
+3. Creates a solution to the inner puzzle to direct the funds to a puzzlehash of their choice (could be a cold wallet address or wherever)
+4. Creates a merkle proof for spending the `p2_merkle` coin
+5. Signs the spend bundle using the key which controls the curried puzzle hash (could be a different key from that used to create the spend in the first place)
+
+#### If the recipient claims the spend
+1. `B`'s wallet will need a way of discovering the `p2_merkle` coin via hint, and will also need a way to discover the timelock value `t`, and the puzzle hash used in `p2_puzzlehash` in order to create a proof for the merkle root. If `p2_merkle` is created from a wrapper puzzle, `B`'s wallet can the solution of the wrapper puzzle to get those values. If it's created directly from the standard wallet, the values will need to be passed in the hint/memos somehow.
+2. Once `B` can calculate the merkle root and proof, they wait until the timelock has expired, then create a solution for the `augmented_condition` puzzle and claim the funds via the solution to the inner puzzle
+
+
