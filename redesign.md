@@ -71,8 +71,61 @@ This is just a p2_puzzle_hash where the curried puzhash is dictated by the type 
 ```
 
 
-#### WALLET_WRAPPER
+#### P2_MERKLE_ROOT
 Coins controlled by clawback wallets have a wrapper puzzle that enforces the p2_merkle. The wallet also has to know a pubblic key for the cold-storage wallet, which it will use to create the clawback puzzlehash should the owner want to reclaim the coins.
+
+Outline of a general puzzle for creating a merkle puzzle (not sure if we actually need this). It curries in a list of puzzles, and when spent it checks the create_coin conditions are spending to a merkle root of those puzzles with some curried params passed in the solution.
+
+```
+(mod
+  (
+    P2_MERKLE_ROOT_MOD
+    PUZZLES
+	curry_params
+	conditions
+  )
+  
+  (include merkle_utils.clib)
+  
+  (defmacro curry_params (puzzle params)
+    ; pass each param into puzzle_hash_of_curried_function
+  )
+  
+  (defun curry_puzzles (PUZZLES params)
+	(if (r PUZZLES)
+	  (c 
+	     (curry_params (f PUZZLES) (f params))
+		 (curry_puzzles (r PUZZLES) (r params))
+	  )
+	  (curry_params (f PUZZLES) (f params))
+	)
+  )
+  
+  (defun-inline check_condition (P2_MERKLE_ROOT_MOD PUZZLES params condition)
+    (assert (= (f (r condition)) (calculate_merkle_root (curry_puzzles PUZZLES params)))
+	  condition
+	)
+  )
+  
+  (defun validate_conditions (P2_MERKLE_ROOT_MOD PUZZLES params conditions)
+    (if conditions
+	  (c
+		(if (= (f (f conditions)) CREATE_COIN)
+		  (check_condition P2_MERKLE_ROOT_MOD PUZZLES params (f conditions))
+		  (f conditions)
+		)
+		(validate_conditions P2_MERKLE_ROOT_MOD PUZZLES params (r conditions))
+	  )
+	  ()
+	)
+  )
+  
+  ; MAIN
+  (validate_conditions P2_MERKLE_ROOT_MOD PUZZLES params conditions)
+  
+)
+```
+
 
 
 ### Description of the clawback process
