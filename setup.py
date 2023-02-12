@@ -8,7 +8,7 @@ with open("README.md", "rt") as fh:
 dependencies = [
     # "chia-blockchain==1.6",
     "chia-blockchain @ git+https://github.com/Chia-Network/chia-blockchain.git@main",
-    "packaging==21.3",
+    "packaging==23.0",
     # "hsms",
 ]
 

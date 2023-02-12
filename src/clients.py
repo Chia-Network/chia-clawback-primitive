@@ -1,5 +1,5 @@
 from pprint import pprint
-from typing import Optional
+from typing import Optional, Tuple
 
 import aiohttp
 
@@ -49,10 +49,10 @@ async def get_node_and_wallet_clients(
     full_node_rpc_port: Optional[int],
     wallet_rpc_port: Optional[int],
     fingerprint: Optional[int],
-):
+) -> Tuple[FullNodeRpcClient, WalletRpcClient]:
     try:
-        full_node_client = await get_node_client(full_node_rpc_port)
-        wallet_client = await get_wallet_client(wallet_rpc_port)
+        full_node_client: FullNodeRpcClient = await get_node_client(full_node_rpc_port)
+        wallet_client: WalletRpcClient = await get_wallet_client(wallet_rpc_port)
         # wallet_client_f = await get_wallet(_wallet_client, fingerprint)
         # assert wallet_client_f is not None
         # wallet_client, _ = wallet_client_f
