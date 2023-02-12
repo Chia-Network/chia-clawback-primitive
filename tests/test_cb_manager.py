@@ -18,12 +18,13 @@ from chia.simulator.simulator_protocol import FarmNewBlockProtocol
 from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.peer_info import PeerInfo
+from chia.util.db_wrapper import DBWrapper2
 from chia.types.spend_bundle import SpendBundle
 from chia.util.ints import uint16, uint64
 from chia.wallet.wallet import Wallet
 
-from src.cb_utils import TEN_SECONDS, TWO_WEEKS
-from src.drivers.cb_manager import CBManager
+from src.drivers.cb_manager import TWO_WEEKS, CBManager
+from src.drivers.cb_store import CBStore
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -144,7 +145,7 @@ async def maker_taker_rpc(
 
 
 @pytest.mark.asyncio
-async def test_cb_clawback(
+async def test_clawback(
     tmp_path: Path,
     maker_taker_rpc: Tuple[Wallet, WalletRpcClient, Wallet, WalletRpcClient, FullNodeSimulator, FullNodeRpcClient],
 ) -> None:
@@ -152,221 +153,69 @@ async def test_cb_clawback(
     wallet_id = 1
     amount = uint64(100000000)
     timelock = TWO_WEEKS
-    manager = CBManager(node_client, client_maker)
     ph_token = bytes32(token_bytes(32))
+    ph_maker = await wallet_maker.get_new_puzzlehash()
+    ph_taker = await wallet_taker.get_new_puzzlehash()
     fee = uint64(10)
 
-    # Create a Clawback Coin
-    cb_info = await manager.set_cb_info(timelock)
+    # setup for maker
+    db_path = tmp_path / "clawback.db"
+    wrapper = await DBWrapper2.create(database=db_path)
+    cb_store = await CBStore.create(wrapper)
+    manager = await CBManager.create(node_client, client_maker, cb_store)
+    
+    # setup for taker
+    claim_db_path = tmp_path / "claim_clawback.db"
+    claim_wrapper = await DBWrapper2.create(database=claim_db_path)
+    claim_cb_store = await CBStore.create(claim_wrapper)
+    claim_manager = await CBManager.create(node_client, client_taker, claim_cb_store)
+    
+    try: 
+        # Create a Clawback Coin    
+        spend_to_claw = await manager.create_cb_coin(amount, ph_taker, ph_maker, timelock, fee=fee)
+        await node_client.push_tx(spend_to_claw)
+        cb_coin = [coin for coin in spend_to_claw.additions() if coin.amount == amount][0]
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+        await manager.save_cb_coin(cb_coin, ph_taker, ph_maker, timelock)
+        records = await manager.get_cb_coins()
+        assert len(records) == 1
+        assert list(records)[0].coin == cb_coin
 
-    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount}]
-    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
-    assert isinstance(tx.spend_bundle, SpendBundle)
-    await node_client.push_tx(tx.spend_bundle)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    cb_coin: Coin = (await manager.get_cb_coins())[0].coin
-    assert cb_coin.puzzle_hash == cb_info.puzzle_hash()
+        # Try to claim before timelock
+        early_claim = await claim_manager.create_claim_spend(cb_coin, ph_taker)
+        with pytest.raises(ValueError) as e_info:
+            await node_client.push_tx(early_claim)
+        assert "ASSERT_SECONDS_RELATIVE_FAILED" in e_info.value.args[0]["error"]
+        
+        # Claw it back
+        cb_record = records.copy().pop()
+        cb_spend = await manager.create_clawback_spend(cb_record, ph_maker)
+        await node_client.push_tx(cb_spend)
+        cb_coin = [coin for coin in cb_spend.additions() if coin.amount == amount][0]
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+        new_coin = await node_client.get_coin_record_by_name(cb_coin.name())
+        assert new_coin
 
-    # send the cb coin to p2_merkle
-    taker_ph = await wallet_taker.get_new_puzzlehash()
-    p2_merkle_sb = await manager.send_cb_coin(amount, taker_ph, fee)
-    await node_client.push_tx(p2_merkle_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    merkle_coin = (await manager.get_p2_merkle_coins(taker_ph))[0]
+        # Make another clawback coin
+        short_timelock = 100
+        spend_to_claim = await manager.create_cb_coin(amount, ph_taker, ph_maker, short_timelock, fee=fee)
+        claim_coin = [coin for coin in spend_to_claim.additions() if coin.amount == amount][0]
+        await node_client.push_tx(spend_to_claim)
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
 
-    # clawback the p2_merkle
-    claw_sb = await manager.clawback_p2_merkle([merkle_coin], taker_ph, fee)
-    # check we don't have a cb coin:
-    cb_coins = await manager.get_cb_coins()
-    assert not cb_coins
+        # Skip time 1
+        full_node_api.use_current_time = False
+        full_node_api.time_per_block = 60 * 60
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
 
-    # push the spend and check we have a returned cb coin
-    await node_client.push_tx(claw_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    cb_coins = await manager.get_cb_coins()
-    assert len(cb_coins) == 1
-    assert cb_coins[0].coin.amount == amount - (2 * fee)
+        start_balance = await wallet_taker.get_confirmed_balance()
+        claim_spend = await claim_manager.create_claim_spend(claim_coin, ph_taker)
+        await node_client.push_tx(claim_spend)
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+        await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
+        end_balance = await wallet_taker.get_confirmed_balance()
+        assert start_balance + amount == end_balance
 
-
-@pytest.mark.asyncio
-async def test_cb_claim(
-    tmp_path: Path,
-    maker_taker_rpc: Tuple[Wallet, WalletRpcClient, Wallet, WalletRpcClient, FullNodeSimulator, FullNodeRpcClient],
-) -> None:
-    wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, node_client = maker_taker_rpc
-    wallet_id = 1
-    amount = uint64(100000000)
-    timelock = TEN_SECONDS
-    manager = CBManager(node_client, client_maker)
-    ph_token = bytes32(token_bytes(32))
-
-    # Create a Clawback Coin
-    cb_info = await manager.set_cb_info(timelock)
-
-    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount}]
-    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
-    assert isinstance(tx.spend_bundle, SpendBundle)
-    await node_client.push_tx(tx.spend_bundle)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    cb_coin: Coin = (await manager.get_cb_coins())[0].coin
-    assert cb_coin.puzzle_hash == cb_info.puzzle_hash()
-
-    # send the cb coin to p2_merkle
-    taker_ph = await wallet_taker.get_new_puzzlehash()
-    p2_merkle_sb = await manager.send_cb_coin(amount, taker_ph)
-    await node_client.push_tx(p2_merkle_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    merkle_coin = (await manager.get_p2_merkle_coins(taker_ph))[0]
-
-    # claim the p2_merkle too early
-    claim_sb = await manager.claim_p2_merkle(merkle_coin.name(), taker_ph)
-    with pytest.raises(ValueError) as e_info:
-        await node_client.push_tx(claim_sb)
-
-    assert "ASSERT_SECONDS_RELATIVE_FAILED" in e_info.value.args[0]["error"]
-
-    # wait and claim it after timelock
-    # TODO: Force block timestamps to avoid using asyncio.sleep
-    await asyncio.sleep(20)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    await node_client.push_tx(claim_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    taker_coins = await node_client.get_coin_records_by_puzzle_hash(taker_ph, include_spent_coins=False)
-    assert len(taker_coins) == 1
-    assert taker_coins[0].coin.amount == amount
-
-
-@pytest.mark.asyncio
-async def test_cb_multiple_coins(
-    tmp_path: Path,
-    maker_taker_rpc: Tuple[Wallet, WalletRpcClient, Wallet, WalletRpcClient, FullNodeSimulator, FullNodeRpcClient],
-) -> None:
-    wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, node_client = maker_taker_rpc
-    wallet_id = 1
-    amount_1 = uint64(500000)
-    amount_2 = uint64(500)
-    fee = uint64(1000)
-    send_amount = uint64(499400)
-    timelock = TWO_WEEKS
-    manager = CBManager(node_client, client_maker)
-    ph_token = bytes32(token_bytes(32))
-
-    # Create a Clawback Coin
-    cb_info = await manager.set_cb_info(timelock)
-
-    # First Coin
-    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount_1}]
-    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
-    assert isinstance(tx.spend_bundle, SpendBundle)
-    await node_client.push_tx(tx.spend_bundle)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    # Second coin
-    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount_2}]
-    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
-    assert isinstance(tx.spend_bundle, SpendBundle)
-    await node_client.push_tx(tx.spend_bundle)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    # send 2 cb coins to p2_merkle
-    taker_ph = await wallet_taker.get_new_puzzlehash()
-    p2_merkle_sb = await manager.send_cb_coin(send_amount, taker_ph, fee)
-
-    await node_client.push_tx(p2_merkle_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    merkle_coins = await manager.get_p2_merkle_coins(taker_ph)
-    assert sum([coin.amount for coin in merkle_coins]) == send_amount
-
-    # check the change coin exists:
-    cb_coins = await manager.get_cb_coins()
-    assert len(cb_coins) == 1
-    cb_amount_left = amount_1 + amount_2 - send_amount - fee
-    assert cb_coins[0].coin.amount == cb_amount_left
-
-    # clawback the p2_merkle coins
-    claw_sb = await manager.clawback_p2_merkle(merkle_coins, taker_ph, fee)
-    # breakpoint()
-
-    # push the spend and check we have a returned cb coin
-    await node_client.push_tx(claw_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    cb_coins = await manager.get_cb_coins()
-    assert sum([cr.coin.amount for cr in cb_coins]) == send_amount - fee + cb_amount_left
-
-
-@pytest.mark.asyncio
-async def test_cb_claim_multiple_coins(
-    tmp_path: Path,
-    maker_taker_rpc: Tuple[Wallet, WalletRpcClient, Wallet, WalletRpcClient, FullNodeSimulator, FullNodeRpcClient],
-) -> None:
-    wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, node_client = maker_taker_rpc
-    wallet_id = 1
-    amount_1 = uint64(500000)
-    amount_2 = uint64(500)
-    fee = uint64(1000)
-    send_amount = uint64(499400)
-    timelock = TEN_SECONDS
-    manager = CBManager(node_client, client_maker)
-    ph_token = bytes32(token_bytes(32))
-
-    # Create a Clawback Coin
-    cb_info = await manager.set_cb_info(timelock)
-
-    # First Coin
-    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount_1}]
-    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
-    assert isinstance(tx.spend_bundle, SpendBundle)
-    await node_client.push_tx(tx.spend_bundle)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    # Second coin
-    additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount_2}]
-    tx = await client_maker.create_signed_transaction(additions=additions, wallet_id=wallet_id)
-    assert isinstance(tx.spend_bundle, SpendBundle)
-    await node_client.push_tx(tx.spend_bundle)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    # send 2 cb coins to p2_merkle
-    taker_ph = await wallet_taker.get_new_puzzlehash()
-    p2_merkle_sb = await manager.send_cb_coin(send_amount, taker_ph, fee)
-
-    await node_client.push_tx(p2_merkle_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    merkle_coins = await manager.get_p2_merkle_coins(taker_ph)
-    assert len(merkle_coins) == 2
-    assert sum([coin.amount for coin in merkle_coins]) == send_amount
-
-    taker_manager = CBManager(node_client, client_taker)
-    bal = await client_taker.get_wallet_balance(wallet_id=1)
-    taker_start_bal = bal["confirmed_wallet_balance"]
-    claim_sb = await taker_manager.claim_p2_merkle_multiple(
-        [coin.name() for coin in merkle_coins], taker_ph, fee, fee_wallet_id=1
-    )
-
-    # wait and claim it after timelock
-    # TODO: Force block timestamps to avoid using asyncio.sleep
-    await asyncio.sleep(30)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    await node_client.push_tx(claim_sb)
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-    await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-
-    taker_coins = await node_client.get_coin_records_by_puzzle_hash(taker_ph, include_spent_coins=False)
-    assert sum([cr.coin.amount for cr in taker_coins]) == send_amount
-
-    bal = await client_taker.get_wallet_balance(wallet_id=1)
-    taker_end_bal = bal["confirmed_wallet_balance"]
-    assert taker_end_bal == taker_start_bal + send_amount - fee
+    finally:
+        await cb_store.close()
+        await claim_cb_store.close()
