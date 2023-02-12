@@ -112,7 +112,7 @@ class CBStore:
             bool(row[3]),
             int(row[10]),
             bool(row[11]),
-            uint64(row[12])
+            uint64(row[12]),
         )
 
     async def get_coin_record(self, coin_name: bytes32) -> Optional[CBInfo]:

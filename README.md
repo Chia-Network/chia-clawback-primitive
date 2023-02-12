@@ -101,7 +101,7 @@ This is the puzzle that "locks" a balance in a coin and ensures that any spend c
 The validator puzzle: `validator.clsp` wraps the `p2_merkle_validator.clsp` puzzle. p2_merkle_validator is responsible for ensuring that any spend directs funds to either the intermediate puzzle, or back to the original clawback puzzle. It also provides an announcement of the amount to ensure that the full coin balance is accounted for.
 
 ### Intermediate Puzzle (p2_merkle)
-The intermediate puzzle (p2\_merkle.clsp) is just a merkle root of two other puzzles: the clawback spend (ach\_clawback.clsp), and the claim spend (ach\_claim.clsp). 
+The intermediate puzzle (p2\_merkle.clsp) is just a merkle root of two other puzzles: the clawback spend (ach\_clawback.clsp), and the claim spend (ach\_claim.clsp).
 
 #### p2\_merkle.clsp
 This is the intermediate puzzle where funds are held after they have been sent from the original owner. It can only be spent by providing the puzzle reveal and proof matching either the clawback or the claim puzzle with the necessary curried parameters. Because both the clawback and the claim puzzles will execute an inner puzzle the users must be able to provide the reveal of the inner puzzle and the appropriate signature. This ensures only the originator can spend the clawback and only the recipient can spend the claim puzzle.
@@ -114,7 +114,7 @@ This puzzle is used by the originator to claw back funds before timelock, or bef
 
 
 ### Keys
-This library uses the keys of the wallet client which is active while using the library. It creates a synthetic secret key with default index of 1 to create the inner puzzle of the clawback coins. The standard wallet is then able to sign these spends. Users should be aware of the potential privacy implications of re-using keys this way. 
+This library uses the keys of the wallet client which is active while using the library. It creates a synthetic secret key with default index of 1 to create the inner puzzle of the clawback coins. The standard wallet is then able to sign these spends. Users should be aware of the potential privacy implications of re-using keys this way.
 
 
 ## Clawback as Protocol

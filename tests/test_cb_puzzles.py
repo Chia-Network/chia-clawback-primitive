@@ -1,25 +1,12 @@
 from blspy import G1Element
-from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.program import Program
-from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.util.ints import uint64
-from chia.wallet.lineage_proof import LineageProof
-from chia.wallet.nft_wallet.nft_puzzles import NFT_METADATA_UPDATER, create_full_puzzle
-from chia.wallet.puzzles.cat_loader import CAT_MOD
-from clvm.casts import int_to_bytes
-from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import solution_for_conditions, puzzle_for_pk
+from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import puzzle_for_pk, solution_for_conditions
 
-from src.drivers.cb_puzzles import (
-    create_clawback_puzzle,
-    create_clawback_solution,
-    create_p2_puzzle_hash_puzzle,
-    create_augmented_cond_puzzle,
-    create_clawback_merkle_tree,
-)
-from src.load_clvm import load_clvm
+from src.drivers.cb_puzzles import create_clawback_puzzle, create_clawback_solution
 
 ACS = Program.to(1)
 ACS_PH = ACS.get_tree_hash()
+
 
 def test_clawback_puzzles():
     timelock = 60
@@ -34,11 +21,10 @@ def test_clawback_puzzles():
 
     sender_sol = solution_for_conditions(
         [
-         [51, sender_ph, amount],
+            [51, sender_ph, amount],
         ]
     )
 
-    merkle_tree = create_clawback_merkle_tree(timelock, sender_ph, recipient_ph)
     cb_sender_sol = create_clawback_solution(timelock, sender_ph, recipient_ph, sender_puz, sender_sol)
 
     conds = clawback_puz.run(cb_sender_sol)
@@ -48,4 +34,3 @@ def test_clawback_puzzles():
     cb_recipient_sol = create_clawback_solution(timelock, sender_ph, recipient_ph, recipient_puz, recipient_sol)
     conds = clawback_puz.run(cb_recipient_sol)
     assert conds
-    

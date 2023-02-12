@@ -9,8 +9,7 @@ from chia.util.ints import uint64
 
 from src import __version__
 from src.clients import get_node_and_wallet_clients
-from src.drivers.cb_puzzles import TWO_WEEKS
-from src.drivers.cb_manager import CBManager
+from src.drivers.cb_manager import TWO_WEEKS, CBManager
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
@@ -19,6 +18,7 @@ def monkey_patch_click() -> None:
     import click.core
 
     click.core._verify_python3_env = lambda *args, **kwargs: 0  # type: ignore
+
 
 def common_options(func):
     func = click.option(
@@ -48,14 +48,14 @@ def common_options(func):
     func = click.option(
         "-np",
         "--node-rpc-port",
-        help="Set the port where the Node is hosting the RPC interface. See the rpc_port under full_node in config.yaml",
+        help="Set the port where the Node is hosting the RPC interface.",
         required=False,
         type=int,
         default=None,
     )(func)
     return func
 
-    
+
 @click.group(
     help="\n Clawback Primitive: Tooling to support clawbacks in Chia\n",
     context_settings=CONTEXT_SETTINGS,
@@ -64,6 +64,8 @@ def common_options(func):
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     ctx.ensure_object(dict)
+
+
 @cli.command(
     "get_address",
     short_help="Get a clawback address",
@@ -71,7 +73,7 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "-t",
     "--to-address",
-    help="The recipient's address"
+    help="The recipient's address",
     required=True,
     type=str,
 )
@@ -102,7 +104,9 @@ def get_address_cmd(
         recipient_ph = decode_puzzle_hash(to_address)
         try:
             cb_manager = CBManager(node_client, wallet_client, key_index)
-            res = await cb_manager.get_cb_address(timelock, recipient_ph, prefix)
+            my_addr = await wallet_client.get_next_address(1, False)
+            sender_ph = decode_puzzle_hash(my_addr)
+            res = await cb_manager.get_cb_address(timelock, recipient_ph, sender_ph)
             print(res)
         finally:
             node_client.close()
@@ -433,7 +437,9 @@ def claim_coin_cmd(
             cb_manager = CBManager(node_client, wallet_client)
             target_puzzle_hash = decode_puzzle_hash(target_address)
             coin_id_bytes = [bytes32.from_hexstr(coin_id) for coin_id in coin_ids]
-            cb_spend = await cb_manager.claim_p2_merkle_multiple(coin_id_bytes, target_puzzle_hash, fee, fee_wallet_id=wallet_id)
+            cb_spend = await cb_manager.claim_p2_merkle_multiple(
+                coin_id_bytes, target_puzzle_hash, fee, fee_wallet_id=wallet_id
+            )
             # if fee > 0:
             #     fee_spend = await cb_manager.create_fee_spend(fee, announcements)
             #     sb = SpendBundle.aggregate([cb_spend, fee_spend])
@@ -442,82 +448,6 @@ def claim_coin_cmd(
             res = await node_client.push_tx(cb_spend)
             assert res["success"]
             print("Successfully claimed coins: {}".format(coin_ids))
-
-        finally:
-            node_client.close()
-            wallet_client.close()
-            await node_client.await_closed()
-            await wallet_client.await_closed()
-
-    asyncio.get_event_loop().run_until_complete(do_command())
-
-@cli.command(
-    "send_direct",
-    short_help="Claim a balance after the timelock has passed",
-)
-@click.option(
-    "-l",
-    "--timelock",
-    help="The timelock to use for the cb coin you're creating. Default is two weeks",
-    required=False,
-    type=int,
-    default=TWO_WEEKS,
-)
-@click.option(
-    "-a",
-    "--amount",
-    help="The amount (in mojos) to send",
-    required=True,
-    type=int,
-)
-@click.option(
-    "-t",
-    "--target-address",
-    help="The original target address of the clawback",
-    required=True,
-    type=str,
-)
-@click.option(
-    "-d",
-    "--fee",
-    help="The fee in mojos for this transaction",
-    required=False,
-    type=int,
-    default=0,
-)
-@common_options
-def send_direct_cmd(
-    timelock: int,
-    amount: int,
-    target_address: str,
-    fee: int,
-    wallet_rpc_port: Optional[int] = None,
-    fingerprint: Optional[int] = None,
-    node_rpc_port: Optional[int] = None,
-):
-    """
-    \b
-    Claim an intermediate coin after the timelock has passed
-    """
-
-    async def do_command():
-        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
-
-        try:
-            cb_manager = CBManager(node_client, wallet_client)
-            cb_info = cb_manager.set_cb_info(timelock)
-            
-            target_puzzle_hash = decode_puzzle_hash(target_address)
-            coin_id_bytes = bytes32.from_hexstr(coin_id)
-            cb_spend = await cb_manager.claim_p2_merkle(coin_id_bytes, target_puzzle_hash)
-            if fee > 0:
-                fee_spend = await cb_manager.create_fee_spend(fee)
-                sb = SpendBundle.aggregate([cb_spend, fee_spend])
-            else:
-                sb = cb_spend
-            res = await node_client.push_tx(sb)
-            assert res["success"]
-            print("Successfully claimed coin: {}".format(coin_id))
 
         finally:
             node_client.close()

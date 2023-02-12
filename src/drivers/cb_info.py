@@ -4,6 +4,7 @@ from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.coin_record import Coin
 from chia.util.ints import uint32, uint64
 
+
 @dataclass(frozen=True)
 class CBInfo:
     coin: Coin

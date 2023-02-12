@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from secrets import token_bytes
 from typing import AsyncGenerator, Tuple
@@ -15,11 +14,9 @@ from chia.rpc.wallet_rpc_client import WalletRpcClient
 from chia.simulator.full_node_simulator import FullNodeSimulator
 from chia.simulator.setup_nodes import setup_simulators_and_wallets
 from chia.simulator.simulator_protocol import FarmNewBlockProtocol
-from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.peer_info import PeerInfo
 from chia.util.db_wrapper import DBWrapper2
-from chia.types.spend_bundle import SpendBundle
 from chia.util.ints import uint16, uint64
 from chia.wallet.wallet import Wallet
 
@@ -150,7 +147,6 @@ async def test_clawback(
     maker_taker_rpc: Tuple[Wallet, WalletRpcClient, Wallet, WalletRpcClient, FullNodeSimulator, FullNodeRpcClient],
 ) -> None:
     wallet_maker, client_maker, wallet_taker, client_taker, full_node_api, node_client = maker_taker_rpc
-    wallet_id = 1
     amount = uint64(100000000)
     timelock = TWO_WEEKS
     ph_token = bytes32(token_bytes(32))
@@ -163,15 +159,15 @@ async def test_clawback(
     wrapper = await DBWrapper2.create(database=db_path)
     cb_store = await CBStore.create(wrapper)
     manager = await CBManager.create(node_client, client_maker, cb_store)
-    
+
     # setup for taker
     claim_db_path = tmp_path / "claim_clawback.db"
     claim_wrapper = await DBWrapper2.create(database=claim_db_path)
     claim_cb_store = await CBStore.create(claim_wrapper)
     claim_manager = await CBManager.create(node_client, client_taker, claim_cb_store)
-    
-    try: 
-        # Create a Clawback Coin    
+
+    try:
+        # Create a Clawback Coin
         spend_to_claw = await manager.create_cb_coin(amount, ph_taker, ph_maker, timelock, fee=fee)
         await node_client.push_tx(spend_to_claw)
         cb_coin = [coin for coin in spend_to_claw.additions() if coin.amount == amount][0]
@@ -186,7 +182,7 @@ async def test_clawback(
         with pytest.raises(ValueError) as e_info:
             await node_client.push_tx(early_claim)
         assert "ASSERT_SECONDS_RELATIVE_FAILED" in e_info.value.args[0]["error"]
-        
+
         # Claw it back
         cb_record = records.copy().pop()
         cb_spend = await manager.create_clawback_spend(cb_record, ph_maker)

@@ -84,29 +84,29 @@ Outline of a general puzzle for creating a merkle puzzle (not sure if we actuall
 	curry_params
 	conditions
   )
-  
+
   (include merkle_utils.clib)
-  
+
   (defmacro curry_params (puzzle params)
     ; pass each param into puzzle_hash_of_curried_function
   )
-  
+
   (defun curry_puzzles (PUZZLES params)
 	(if (r PUZZLES)
-	  (c 
+	  (c
 	     (curry_params (f PUZZLES) (f params))
 		 (curry_puzzles (r PUZZLES) (r params))
 	  )
 	  (curry_params (f PUZZLES) (f params))
 	)
   )
-  
+
   (defun-inline check_condition (P2_MERKLE_ROOT_MOD PUZZLES params condition)
     (assert (= (f (r condition)) (calculate_merkle_root (curry_puzzles PUZZLES params)))
 	  condition
 	)
   )
-  
+
   (defun validate_conditions (P2_MERKLE_ROOT_MOD PUZZLES params conditions)
     (if conditions
 	  (c
@@ -119,10 +119,10 @@ Outline of a general puzzle for creating a merkle puzzle (not sure if we actuall
 	  ()
 	)
   )
-  
+
   ; MAIN
   (validate_conditions P2_MERKLE_ROOT_MOD PUZZLES params conditions)
-  
+
 )
 ```
 
@@ -146,5 +146,3 @@ Outline of a general puzzle for creating a merkle puzzle (not sure if we actuall
 #### If the recipient claims the spend
 1. `B`'s wallet will need a way of discovering the `p2_merkle` coin via hint, and will also need a way to discover the timelock value `t`, and the puzzle hash used in `p2_puzzlehash` in order to create a proof for the merkle root. If `p2_merkle` is created from a wrapper puzzle, `B`'s wallet can the solution of the wrapper puzzle to get those values. If it's created directly from the standard wallet, the values will need to be passed in the hint/memos somehow.
 2. Once `B` can calculate the merkle root and proof, they wait until the timelock has expired, then create a solution for the `augmented_condition` puzzle and claim the funds via the solution to the inner puzzle
-
-

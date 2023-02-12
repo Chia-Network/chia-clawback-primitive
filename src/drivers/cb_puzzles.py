@@ -1,14 +1,9 @@
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Tuple
 
-from blspy import G1Element
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.util.ints import uint32, uint64
-from chia.util.streamable import Streamable, streamable
-from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import puzzle_for_pk, solution_for_conditions
+from chia.util.ints import uint64
 from chia.wallet.util.merkle_utils import build_merkle_tree
-from clvm.casts import int_from_bytes
 
 from src.load_clvm import load_clvm
 
@@ -16,31 +11,41 @@ P2_1_OF_N = load_clvm("p2_1_of_n.clsp", "src.clsp")
 P2_CURRIED_PUZZLE_HASH = load_clvm("p2_puzzle_hash.clsp", "src.clsp")
 AUGMENTED_CONDITION = load_clvm("augmented_condition.clsp", "src.clsp")
 
+
 def create_augmented_cond_puzzle(condition: List[Any], puzzle_hash: bytes32) -> Program:
     return AUGMENTED_CONDITION.curry(condition, puzzle_hash)
+
 
 def create_augmented_cond_solution(inner_puzzle: Program, inner_solution: Program) -> Program:
     return Program.to([inner_puzzle, inner_solution])
 
+
 def create_p2_puzzle_hash_puzzle(puzzle_hash: bytes32) -> Program:
     return P2_CURRIED_PUZZLE_HASH.curry(puzzle_hash)
+
 
 def create_p2_puzzle_hash_solution(inner_puzzle: Program, inner_solution: Program) -> Program:
     return Program.to([inner_puzzle, inner_solution])
 
-def create_clawback_merkle_tree(timelock: uint64, sender_ph: bytes32, recipient_ph: bytes32) -> Program:
+
+def create_clawback_merkle_tree(
+    timelock: uint64, sender_ph: bytes32, recipient_ph: bytes32
+) -> Tuple[bytes32, Dict[bytes32, Tuple[int, List[bytes32]]]]:
     timelock_condition = [80, timelock]
     augmented_cond_puz = create_augmented_cond_puzzle(timelock_condition, recipient_ph)
     p2_puzzle_hash_puz = create_p2_puzzle_hash_puzzle(sender_ph)
     merkle_tree = build_merkle_tree([augmented_cond_puz.get_tree_hash(), p2_puzzle_hash_puz.get_tree_hash()])
     return merkle_tree
 
+
 def create_merkle_proof(merkle_tree, puzzle_hash: bytes32):
     return Program.to(merkle_tree[1][puzzle_hash])
+
 
 def create_clawback_puzzle(timelock: uint64, sender_ph: bytes32, recipient_ph: bytes32) -> Program:
     merkle_tree = create_clawback_merkle_tree(timelock, sender_ph, recipient_ph)
     return P2_1_OF_N.curry(merkle_tree[0])
+
 
 def create_clawback_solution(
     timelock: uint64,

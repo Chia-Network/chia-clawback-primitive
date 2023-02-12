@@ -1,13 +1,12 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from blspy import AugSchemeMPL, G1Element, G2Element, PrivateKey
 from chia.consensus.block_record import BlockRecord
 from chia.consensus.default_constants import DEFAULT_CONSTANTS
-from chia.types.blockchain_format.program import Program
 from chia.rpc.full_node_rpc_client import FullNodeRpcClient
 from chia.rpc.wallet_rpc_client import WalletRpcClient
-from chia.types.announcement import Announcement
 from chia.types.blockchain_format.coin import Coin
+from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.coin_record import CoinRecord
 from chia.types.coin_spend import CoinSpend
@@ -19,19 +18,16 @@ from chia.util.condition_tools import conditions_dict_for_solution, pkm_pairs_fo
 from chia.util.ints import uint32, uint64
 from chia.wallet.derive_keys import master_sk_to_wallet_sk, master_sk_to_wallet_sk_unhardened
 from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import (
-    MOD,
     DEFAULT_HIDDEN_PUZZLE_HASH,
+    MOD,
     calculate_synthetic_secret_key,
     puzzle_for_pk,
     solution_for_conditions,
 )
-from chia.wallet.transaction_record import TransactionRecord
-from chia.util.bech32m import decode_puzzle_hash
+from clvm.casts import int_from_bytes, int_to_bytes
 
-from clvm.casts import int_to_bytes, int_from_bytes
-
-from src.drivers.cb_puzzles import P2_1_OF_N, create_clawback_puzzle, create_clawback_solution
 from src.drivers.cb_info import CBInfo
+from src.drivers.cb_puzzles import P2_1_OF_N, create_clawback_puzzle, create_clawback_solution
 from src.drivers.cb_store import CBStore
 
 # Common Timelock Periods
@@ -40,34 +36,29 @@ ONE_DAY = ONE_HOUR * 24
 ONE_WEEK = ONE_DAY * 7
 TWO_WEEKS = ONE_WEEK * 2
 
+
 class CBManager:
+    node_client: FullNodeRpcClient
+    wallet_client: WalletRpcClient
+    cb_store: CBStore
+
     @classmethod
     async def create(cls, node_client: FullNodeRpcClient, wallet_client: WalletRpcClient, cb_store: CBStore):
         self = CBManager()
-        self.node_client: FullNodeRpcClient = node_client
-        self.wallet_client: WalletRpcClient = wallet_client
-        self.cb_store: CBStore = cb_store
+        self.node_client = node_client
+        self.wallet_client = wallet_client
+        self.cb_store = cb_store
         return self
 
-    async def get_derivation_index(self) -> int:
+    async def get_derivation_index(self) -> uint32:
         index = await self.wallet_client.get_current_derivation_index()
-        return index
+        return uint32(index)
 
     async def get_private_key(self) -> PrivateKey:
         fp = await self.wallet_client.get_logged_in_fingerprint()
         sk_dict = await self.wallet_client.get_private_key(fp)
         private_key = PrivateKey.from_bytes(hexstr_to_bytes(sk_dict["sk"]))
         return private_key
-
-    async def get_public_key(self, index: Optional[uint32] = None, hardened: bool = True) -> G1Element:
-        private_key = await self.get_private_key()
-        if not index:
-            index = await self.get_derivation_index()
-        if hardened:
-            derived_private_key = master_sk_to_wallet_sk(private_key, index)
-        else:
-            derived_private_key = master_sk_to_wallet_sk_unhardened(private_key, index)
-        return derived_private_key.get_g1()
 
     async def get_keys_for_puzzle_hash(
         self, puzzle_hash: bytes32, max_index: Optional[uint32] = None
@@ -94,16 +85,24 @@ class CBManager:
         cb_puzzle = create_clawback_puzzle(timelock, sender_ph, recipient_ph)
         return cb_puzzle
 
-    def get_cb_puzzle_hash(self, timelock: uint64, recipient_ph: bytes32, sender_ph: bytes32) ->  bytes32:
+    def get_cb_puzzle_hash(self, timelock: uint64, recipient_ph: bytes32, sender_ph: bytes32) -> bytes32:
         cb_puzzle = self.get_cb_puzzle(timelock, recipient_ph, sender_ph)
         return cb_puzzle.get_tree_hash()
 
-    def get_cb_address(self, timelock: uint64, recipient_ph: bytes32, prefix: str = "xch") -> str:
-        puzzle_hash = self.get_cb_puzzle_hash(timelock, recipient_ph)
+    def get_cb_address(self, timelock: uint64, recipient_ph: bytes32, sender_ph: bytes32, prefix: str = "xch") -> str:
+        puzzle_hash = self.get_cb_puzzle_hash(timelock, recipient_ph, sender_ph)
         return encode_puzzle_hash(puzzle_hash, prefix)
 
-    async def create_cb_coin(self, amount: uint64, recipient_ph: bytes32, sender_ph: bytes32, timelock: uint64, fee: uint64 = uint64(0), wallet_id: int = 1) -> SpendBundle:
-        coins = await self.wallet_client.select_coins(amount, wallet_id, min_coin_amount=amount+fee)
+    async def create_cb_coin(
+        self,
+        amount: uint64,
+        recipient_ph: bytes32,
+        sender_ph: bytes32,
+        timelock: uint64,
+        fee: uint64 = uint64(0),
+        wallet_id: int = 1,
+    ) -> SpendBundle:
+        coins = await self.wallet_client.select_coins(amount, wallet_id, min_coin_amount=uint64(amount + fee))
         if not coins:
             raise ValueError("Insufficient funds")
         if len(coins) != 1:
@@ -138,38 +137,52 @@ class CBManager:
         cr = await self.node_client.get_coin_record_by_name(cb_coin.name())
         assert isinstance(cr, CoinRecord)
         cb_record = CBInfo(
-            cb_coin, recipient_ph, sender_ph, timelock, cr.confirmed_block_index, cr.spent_block_index, cr.spent, index, hardened, timestamp
+            cb_coin,
+            recipient_ph,
+            sender_ph,
+            timelock,
+            cr.confirmed_block_index,
+            cr.spent_block_index,
+            cr.spent,
+            index,
+            hardened,
+            timestamp,
         )
         await self.cb_store.add_coin_record(cb_record)
 
     async def get_cb_coin_by_id(self, coin_id: bytes32) -> Optional[CoinRecord]:
         return await self.node_client.get_coin_record_by_name(coin_id)
 
-    async def get_cb_coins(self) -> List[CoinRecord]:
+    async def get_cb_coins(self) -> Set[CBInfo]:
         records = await self.cb_store.get_all_unspent_coins()
         return records
-    
+
     async def create_clawback_spend(self, cb_info: CBInfo, to_puzzle_hash: bytes32) -> SpendBundle:
         puzzle = self.get_cb_puzzle(cb_info.timelock, cb_info.recipient_ph, cb_info.sender_ph)
         inner_puzzle = await self.get_puzzle_for_puzzle_hash(cb_info.sender_ph)
         assert inner_puzzle.get_tree_hash() == cb_info.sender_ph
-        inner_solution = solution_for_conditions([
-            [ConditionOpcode.CREATE_COIN, to_puzzle_hash, cb_info.coin.amount]
-        ])
-        solution = create_clawback_solution(cb_info.timelock, cb_info.sender_ph, cb_info.recipient_ph, inner_puzzle, inner_solution)
+        inner_solution = solution_for_conditions([[ConditionOpcode.CREATE_COIN, to_puzzle_hash, cb_info.coin.amount]])
+        solution = create_clawback_solution(
+            cb_info.timelock, cb_info.sender_ph, cb_info.recipient_ph, inner_puzzle, inner_solution
+        )
         coin_spend = CoinSpend(cb_info.coin, puzzle, solution)
         spend = await self.sign_coin_spends([coin_spend])
         return spend
 
-    async def get_cb_details(self, coin: Coin) -> List:
+    async def get_cb_details(self, coin: Coin) -> Tuple:
         parent_cr = await self.node_client.get_coin_record_by_name(coin.parent_coin_info)
-        parent_spend = await self.node_client.get_puzzle_and_solution(coin.parent_coin_info, parent_cr.spent_block_index)
+        assert isinstance(parent_cr, CoinRecord)
+        parent_spend = await self.node_client.get_puzzle_and_solution(
+            coin.parent_coin_info, parent_cr.spent_block_index
+        )
+        assert isinstance(parent_spend, CoinSpend)
         puzzle = parent_spend.puzzle_reveal.to_program()
         solution = parent_spend.solution.to_program()
         conditions = conditions_dict_for_solution(puzzle, solution, DEFAULT_CONSTANTS.MAX_BLOCK_COST_CLVM)
-        try:
+        assert isinstance(conditions[1], Dict)
+        if ConditionOpcode.REMARK in conditions[1].keys():
             remark = conditions[1][ConditionOpcode.REMARK][0].vars[0]
-        except:
+        else:
             raise ValueError("Coin doess not contain a valid clawback puzzle")
         sender_ph = bytes32(remark[:32])
         recipient_ph = bytes32(remark[32:64])
@@ -180,14 +193,12 @@ class CBManager:
         sender_ph, recipient_ph, timelock = await self.get_cb_details(coin)
         puzzle = self.get_cb_puzzle(timelock, recipient_ph, sender_ph)
         inner_puzzle = await self.get_puzzle_for_puzzle_hash(recipient_ph)
-        inner_solution = solution_for_conditions([
-            [ConditionOpcode.CREATE_COIN, claim_to, coin.amount]
-        ])
+        inner_solution = solution_for_conditions([[ConditionOpcode.CREATE_COIN, claim_to, coin.amount]])
         solution = create_clawback_solution(timelock, sender_ph, recipient_ph, inner_puzzle, inner_solution)
         coin_spend = CoinSpend(coin, puzzle, solution)
         spend = await self.sign_coin_spends([coin_spend])
         return spend
-        
+
     async def sign_coin_spends(self, coin_spends: List[CoinSpend]) -> SpendBundle:
         additional_data = DEFAULT_CONSTANTS.AGG_SIG_ME_ADDITIONAL_DATA
         signatures: List[G2Element] = []
