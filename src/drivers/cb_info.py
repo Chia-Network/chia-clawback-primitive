@@ -14,8 +14,6 @@ class CBInfo:
     confirmed_block_height: uint32
     spent_block_height: uint32
     spent: bool
-    key_derivation_index: int
-    hardened: bool
     timestamp: uint64
 
     def name(self) -> bytes32:

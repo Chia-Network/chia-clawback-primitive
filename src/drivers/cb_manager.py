@@ -125,37 +125,59 @@ class CBManager:
         spend = await self.sign_coin_spends([coin_spend])
         return spend
 
-    async def save_cb_coin(self, cb_coin: Coin, recipient_ph: bytes32, sender_ph: bytes32, timelock: uint64) -> None:
-        parent_cr = await self.node_client.get_coin_record_by_name(cb_coin.parent_coin_info)
+    async def add_new_coin(self, coin: Coin, recipient_ph: bytes32, sender_ph: bytes32, timelock: uint64) -> None:
+        cb_record = CBInfo(
+            coin,
+            recipient_ph,
+            sender_ph,
+            timelock,
+            0,
+            0,
+            0,
+            0,
+        )
+        await self.cb_store.add_coin_record(cb_record)
+
+    async def update_coin_record(self, coin_id: bytes32) -> None:
+        cb_info = await self.get_cb_info_by_id(coin_id)
+        await self.cb_store.add_coin_record(cb_info)
+
+    async def update_records(self) -> None:
+        records = await self.cb_store.get_all_unspent_coins()
+        for record in records:
+            await self.update_coin_record(record.coin.name())
+
+    async def get_cb_coin_by_id(self, coin_id: bytes32) -> Optional[CoinRecord]:
+        coin_record = await self.node_client.get_coin_record_by_name(coin_id)
+        return coin_record.coin
+
+    async def get_cb_info_by_id(self, coin_id: bytes32) -> Optional[CBInfo]:
+        coin = await self.get_cb_coin_by_id(coin_id)
+        sender_ph, recipient_ph, timelock = await self.get_cb_details(coin)
+        parent_cr = await self.node_client.get_coin_record_by_name(coin.parent_coin_info)
         assert isinstance(parent_cr, CoinRecord)
         parent_ph = parent_cr.coin.puzzle_hash
-        _, index, hardened = await self.get_keys_for_puzzle_hash(parent_ph)
         block = await self.node_client.get_block_record_by_height(parent_cr.spent_block_index)
         assert isinstance(block, BlockRecord)
         assert isinstance(block.timestamp, uint64)
         timestamp: uint64 = block.timestamp
-        cr = await self.node_client.get_coin_record_by_name(cb_coin.name())
+        cr = await self.node_client.get_coin_record_by_name(coin.name())
         assert isinstance(cr, CoinRecord)
-        cb_record = CBInfo(
-            cb_coin,
+        cb_info = CBInfo(
+            coin,
             recipient_ph,
             sender_ph,
             timelock,
             cr.confirmed_block_index,
             cr.spent_block_index,
             cr.spent,
-            index,
-            hardened,
             timestamp,
         )
-        await self.cb_store.add_coin_record(cb_record)
+        return cb_info
 
-    async def get_cb_coin_by_id(self, coin_id: bytes32) -> Optional[CoinRecord]:
-        return await self.node_client.get_coin_record_by_name(coin_id)
-
-    async def get_cb_coins(self) -> Set[CBInfo]:
+    async def get_cb_coins(self) -> List[CBInfo]:
         records = await self.cb_store.get_all_unspent_coins()
-        return records
+        return sorted(records, key=lambda record: record.confirmed_block_height)
 
     async def create_clawback_spend(self, cb_info: CBInfo, to_puzzle_hash: bytes32) -> SpendBundle:
         puzzle = self.get_cb_puzzle(cb_info.timelock, cb_info.recipient_ph, cb_info.sender_ph)

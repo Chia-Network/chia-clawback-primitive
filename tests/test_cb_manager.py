@@ -172,7 +172,7 @@ async def test_clawback(
         await node_client.push_tx(spend_to_claw)
         cb_coin = [coin for coin in spend_to_claw.additions() if coin.amount == amount][0]
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
-        await manager.save_cb_coin(cb_coin, ph_taker, ph_maker, timelock)
+        await manager.add_new_coin(cb_coin, ph_taker, ph_maker, timelock)
         records = await manager.get_cb_coins()
         assert len(records) == 1
         assert list(records)[0].coin == cb_coin

@@ -38,8 +38,6 @@ class CBStore:
                     " recipient_ph text,"
                     " sender_ph text,"
                     " timelock bigint,"
-                    " key_derivation_index int,"
-                    " hardened int,"
                     " timestamp bigint)"
                 )
             )
@@ -65,7 +63,7 @@ class CBStore:
         assert record.spent == (record.spent_block_height != 0)
         async with self.db_wrapper.writer_maybe_transaction() as conn:
             await conn.execute_insert(
-                "INSERT OR REPLACE INTO cb_record VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO cb_record VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     name.hex(),
                     record.confirmed_block_height,
@@ -77,8 +75,6 @@ class CBStore:
                     str(record.recipient_ph.hex()),
                     str(record.sender_ph.hex()),
                     int(record.timelock),
-                    int(record.key_derivation_index),
-                    int(record.hardened),
                     int(record.timestamp),
                 ),
             )
@@ -110,9 +106,7 @@ class CBStore:
             uint32(row[1]),
             uint32(row[2]),
             bool(row[3]),
-            int(row[10]),
-            bool(row[11]),
-            uint64(row[12]),
+            uint64(row[10]),
         )
 
     async def get_coin_record(self, coin_name: bytes32) -> Optional[CBInfo]:
