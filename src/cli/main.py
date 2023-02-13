@@ -2,14 +2,18 @@ import asyncio
 from typing import List, Optional
 
 import click
+import time
+from pathlib import Path
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.types.spend_bundle import SpendBundle
 from chia.util.bech32m import decode_puzzle_hash
+from chia.util.db_wrapper import DBWrapper2
 from chia.util.ints import uint64
 
 from src import __version__
 from src.clients import get_node_and_wallet_clients
 from src.drivers.cb_manager import TWO_WEEKS, CBManager
+from src.drivers.cb_store import CBStore
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
 
@@ -22,12 +26,12 @@ def monkey_patch_click() -> None:
 
 def common_options(func):
     func = click.option(
-        "-k",
-        "--key-index",
-        help="The key derivation index (default 1)",
+        "-db",
+        "--db-path",
+        help="Set the path for the database",
         required=False,
-        type=int,
-        default=1,
+        type=str,
+        default="",
     )(func)
     func = click.option(
         "-wp",
@@ -67,59 +71,15 @@ def cli(ctx: click.Context) -> None:
 
 
 @cli.command(
-    "get_address",
-    short_help="Get a clawback address",
+    "create",
+    short_help="Send xch to a clawback coin",
 )
 @click.option(
     "-t",
-    "--to-address",
+    "--to",
     help="The recipient's address",
     required=True,
     type=str,
-)
-@click.option(
-    "-l",
-    "--timelock",
-    help="The timelock to use for the clawback coin you're creating. Default is two weeks",
-    required=False,
-    type=int,
-    default=TWO_WEEKS,
-)
-@common_options
-def get_address_cmd(
-    to_address: str,
-    timelock: int,
-    key_index: int,
-    wallet_rpc_port: Optional[int] = None,
-    fingerprint: Optional[int] = None,
-    node_rpc_port: Optional[int] = None,
-):
-    """
-    \b
-    Get a clawback address from the connected wallet client
-    """
-
-    async def do_command():
-        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
-        recipient_ph = decode_puzzle_hash(to_address)
-        try:
-            cb_manager = CBManager(node_client, wallet_client, key_index)
-            my_addr = await wallet_client.get_next_address(1, False)
-            sender_ph = decode_puzzle_hash(my_addr)
-            res = await cb_manager.get_cb_address(timelock, recipient_ph, sender_ph)
-            print(res)
-        finally:
-            node_client.close()
-            wallet_client.close()
-            await node_client.await_closed()
-            await wallet_client.await_closed()
-
-    asyncio.get_event_loop().run_until_complete(do_command())
-
-
-@cli.command(
-    "create_coin",
-    short_help="Send xch to a clawback coin",
 )
 @click.option(
     "-l",
@@ -139,8 +99,8 @@ def get_address_cmd(
 @click.option(
     "-w",
     "--wallet-id",
-    help="The wallet id to fund from",
-    required=True,
+    help="The wallet id to send from",
+    required=False,
     type=int,
     default=1,
 )
@@ -153,250 +113,124 @@ def get_address_cmd(
     default=0,
 )
 @common_options
-def create_cb_cmd(
+def create_cmd(
+    to: str,
     timelock: int,
     amount: int,
     wallet_id: int,
     fee: int = 0,
+    db_path: str = "",
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
     node_rpc_port: Optional[int] = None,
 ):
     """
     \b
-    Create a transaction to fund a clawback coin
+    Make a transaction to create a clawback coin
     """
 
-    async def do_command():
+    async def do_command(fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
-
+        if not fingerprint:
+            fingerprint = await wallet_client.get_logged_in_fingerprint()
+        db_file = Path(db_path) / f"clawback_{fingerprint}.db"
+        wrapper = await DBWrapper2.create(database=db_file)
+        cb_store = await CBStore.create(wrapper)
         try:
-            cb_manager = CBManager(node_client, wallet_client)
-            cb_info = await cb_manager.set_cb_info(timelock)
-            additions = [{"puzzle_hash": cb_info.puzzle_hash(), "amount": amount}]
-            tx = await wallet_client.create_signed_transaction(
-                additions=additions, wallet_id=wallet_id, fee=uint64(fee)
-            )
-            assert isinstance(tx.spend_bundle, SpendBundle)
-            res = await node_client.push_tx(tx.spend_bundle)
-            assert res["success"]
-            created_coin = [coin for coin in tx.spend_bundle.additions() if coin.amount == amount][0]
-            print(res)
-            print("Created Coin with ID: {}".format(created_coin.name().hex()))
-            print(created_coin)
+            manager = await CBManager.create(node_client, wallet_client, cb_store)
+            recipient_ph = decode_puzzle_hash(to)
+            sender_addr = await wallet_client.get_next_address(wallet_id, True)
+            sender_ph = decode_puzzle_hash(sender_addr)
+            spend = await manager.create_cb_coin(amount, recipient_ph, sender_ph, timelock, fee=fee)
+            await node_client.push_tx(spend)
+            cb_coin = [coin for coin in spend.additions() if coin.amount == amount][0]
+            await manager.add_new_coin(cb_coin, recipient_ph, sender_ph, timelock)
+            print("Created Coin with ID: {}".format(cb_coin.name().hex()))
+            print(cb_coin)
         finally:
+            await cb_store.close()
             node_client.close()
             wallet_client.close()
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command())
+    asyncio.get_event_loop().run_until_complete(do_command(fingerprint))
 
 
 @cli.command(
-    "get_my_coins",
-    short_help="Get details for all clawback coins for a given timelock",
-)
-@click.option(
-    "-l",
-    "--timelock",
-    help="The timelock to use for the cb coin you're creating. Default is two weeks",
-    required=False,
-    type=int,
-    default=TWO_WEEKS,
-)
-@common_options
-def get_cb_coins_cmd(
-    timelock: int,
-    wallet_rpc_port: Optional[int] = None,
-    fingerprint: Optional[int] = None,
-    node_rpc_port: Optional[int] = None,
-):
-    """
-    \b
-    Get details for all clawback coins for a given timelock
-    """
-
-    async def do_command():
-        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
-
-        try:
-            cb_manager = CBManager(node_client, wallet_client)
-            await cb_manager.set_cb_info(timelock)
-            coins = await cb_manager.get_cb_coins()
-            total_amount = 0
-            for coin_rec in coins:
-                print("{}".format(coin_rec.coin))
-                total_amount += coin_rec.coin.amount
-            print("\nAvailable clawback balance: {} mojos".format(total_amount))
-        finally:
-            node_client.close()
-            wallet_client.close()
-            await node_client.await_closed()
-            await wallet_client.await_closed()
-
-    asyncio.get_event_loop().run_until_complete(do_command())
-
-
-@cli.command("send_clawback", short_help="Send a clawback transaction")
-@click.option(
-    "-l",
-    "--timelock",
-    help="The timelock on the coin(s) you want to spend. Default is two weeks",
-    required=False,
-    type=int,
-    default=TWO_WEEKS,
-)
-@click.option(
-    "-a",
-    "--amount",
-    help="The amount (in mojos) to send",
-    required=True,
-    type=int,
-)
-@click.option(
-    "-t",
-    "--target-address",
-    help="The target address of the clawback",
-    required=True,
-    type=str,
-)
-@click.option(
-    "-d",
-    "--fee",
-    help="The fee in mojos for this transaction",
-    required=False,
-    type=int,
-    default=0,
-)
-@common_options
-def send_clawback_cmd(
-    timelock: int,
-    amount: int,
-    target_address: str,
-    fee: int,
-    wallet_rpc_port: Optional[int] = None,
-    fingerprint: Optional[int] = None,
-    node_rpc_port: Optional[int] = None,
-):
-    """
-    \b
-    Send a clawback transaction to the intermediate puzzle
-    """
-
-    async def do_command():
-        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
-
-        try:
-            cb_manager = CBManager(node_client, wallet_client)
-            cb_info = await cb_manager.set_cb_info(timelock)
-            target_puzzle_hash = decode_puzzle_hash(target_address)
-            cb_spend = await cb_manager.send_cb_coin(amount, target_puzzle_hash, fee)
-            res = await node_client.push_tx(cb_spend)
-            assert res["success"]
-            p2_merkle_coins = [coin for coin in cb_spend.additions() if coin.puzzle_hash != cb_info.puzzle_hash()]
-            print("Created coin ids:")
-            for coin in p2_merkle_coins:
-                print("{}".format(coin.name().hex()))
-
-        finally:
-            node_client.close()
-            wallet_client.close()
-            await node_client.await_closed()
-            await wallet_client.await_closed()
-
-    asyncio.get_event_loop().run_until_complete(do_command())
-
-
-@cli.command(
-    "clawback",
-    short_help="Clawback a previously sent transaction",
-)
-@click.option(
-    "-l",
-    "--timelock",
-    help="The timelock to use for the cb coin you're creating. Default is two weeks",
-    required=False,
-    type=int,
-    default=TWO_WEEKS,
-)
-@click.option(
-    "-t",
-    "--target-address",
-    help="The original target address you sent the clawback to",
-    required=True,
-    type=str,
+    "show",
+    short_help="Show details of all clawback coins",
 )
 @click.option(
     "-c",
-    "--coin-ids",
-    help="The coin IDs you want to claw back (supports multiple use)",
-    required=True,
-    multiple=True,
-    type=str,
-)
-@click.option(
-    "-d",
-    "--fee",
-    help="The fee in mojos for this transaction",
+    "--coin-id",
+    help="The coin ID you want to claw back",
     required=False,
-    type=int,
-    default=0,
+    type=str,
+    default=None,
 )
 @common_options
-def clawback_coin_cmd(
-    timelock: int,
-    target_address: str,
-    coin_ids: List[str],
-    fee: int,
+def show_cmd(
+    coin_id: str,
+    db_path: str = "clawback.db",
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
     node_rpc_port: Optional[int] = None,
 ):
     """
     \b
-    Clawback a transaction
+    Get details for all clawback coins
     """
 
-    async def do_command():
+    async def do_command(coin_id, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
-
+        if not fingerprint:
+            fingerprint = await wallet_client.get_logged_in_fingerprint()
+        db_file = Path(db_path) / f"clawback_{fingerprint}.db"
+        wrapper = await DBWrapper2.create(database=db_file)
+        cb_store = await CBStore.create(wrapper)
         try:
-            cb_manager = CBManager(node_client, wallet_client)
-            await cb_manager.set_cb_info(timelock)
-            coin_id_bytes = [bytes32.from_hexstr(coin_id) for coin_id in coin_ids]
-            target_puzzle_hash = decode_puzzle_hash(target_address)
-            cb_spend = await cb_manager.clawback_p2_merkle_coin_ids(coin_id_bytes, target_puzzle_hash, fee)
-            res = await node_client.push_tx(cb_spend)
-            assert res["success"]
-            print("Successfully clawed back coin(s): {}".format(coin_ids))
-
+            manager = await CBManager.create(node_client, wallet_client, cb_store)
+            print("Updating coin records...")
+            await manager.update_records()
+            if coin_id:
+                record = await manager.get_cb_info_by_id(bytes32.from_hexstr(coin_id))
+                records = [record]
+            else:
+                records = await manager.get_cb_coins()
+            current_time = time.time()
+            if records:
+                for record in records:
+                    block = await node_client.get_block_record_by_height(record.confirmed_block_height)
+                    time_left = int(record.timelock - (current_time - block.timestamp))
+                    if time_left <= 0:
+                        time_left = 0
+                    print("\n")
+                    print(f"Coin ID: {record.coin.name().hex()}")
+                    print(f"Amount: {record.coin.amount} mojos")
+                    print(f"Timelock: {record.timelock} seconds")
+                    print(f"Time left: {time_left} seconds")
+            else:
+                print("No coins found")
         finally:
+            await cb_store.close()
             node_client.close()
             wallet_client.close()
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command())
+    asyncio.get_event_loop().run_until_complete(do_command(coin_id, fingerprint))
 
 
 @cli.command(
-    "claim",
-    short_help="Claim a balance after the timelock has passed",
-)
-@click.option(
-    "-t",
-    "--target-address",
-    help="The original target address of the clawback",
-    required=True,
-    type=str,
+    "claw",
+    short_help="Clawback an unclaimed coin",
 )
 @click.option(
     "-c",
-    "--coin-ids",
-    help="The coin ID you want to claim (supports multiple)",
+    "--coin-id",
+    help="The coin ID you want to claw back",
     required=True,
-    multiple=True,
     type=str,
 )
 @click.option(
@@ -410,54 +244,141 @@ def clawback_coin_cmd(
 @click.option(
     "-w",
     "--wallet-id",
-    help="The wallet id to fund the fee spend from",
+    help="The wallet id for fees. If no target address given the clawback will go to this wallet id ",
     required=False,
     type=int,
     default=1,
 )
+@click.option(
+    "-t",
+    "--target-address",
+    help="The address you want to sent the clawed back coin to",
+    required=False,
+    type=str,
+    default=None
+)
 @common_options
-def claim_coin_cmd(
-    target_address: str,
-    coin_ids: List[str],
+def claw_cmd(
+    coin_id: str,
     fee: int = 0,
     wallet_id: int = 1,
+    target_address: str = None,
+    db_path: str = "clawback.db",
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
     node_rpc_port: Optional[int] = None,
 ):
     """
     \b
-    Claim an intermediate coin after the timelock has passed
+    Clawback an unclaimed coin
     """
-
-    async def do_command():
+    async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
-
+        if not fingerprint:
+            fingerprint = await wallet_client.get_logged_in_fingerprint()
+        db_file = Path(db_path) / f"clawback_{fingerprint}.db"
+        wrapper = await DBWrapper2.create(database=db_file)
+        cb_store = await CBStore.create(wrapper)
         try:
-            cb_manager = CBManager(node_client, wallet_client)
-            target_puzzle_hash = decode_puzzle_hash(target_address)
-            coin_id_bytes = [bytes32.from_hexstr(coin_id) for coin_id in coin_ids]
-            cb_spend = await cb_manager.claim_p2_merkle_multiple(
-                coin_id_bytes, target_puzzle_hash, fee, fee_wallet_id=wallet_id
-            )
-            # if fee > 0:
-            #     fee_spend = await cb_manager.create_fee_spend(fee, announcements)
-            #     sb = SpendBundle.aggregate([cb_spend, fee_spend])
-            # else:
-            #     sb = cb_spend
-            res = await node_client.push_tx(cb_spend)
-            assert res["success"]
-            print("Successfully claimed coins: {}".format(coin_ids))
-
+            manager = await CBManager.create(node_client, wallet_client, cb_store)
+            if not target_address:
+                target_address = await wallet_client.get_next_address(wallet_id, True)
+            target_ph = decode_puzzle_hash(target_address)
+            cb_info = await manager.get_cb_info_by_id(bytes32.from_hexstr(coin_id))
+            coin_record = await node_client.get_coin_record_by_name(bytes32.from_hexstr(coin_id))
+            if coin_record.spent:
+                raise ValueError("This coin has already been spent")
+            spend = await manager.create_clawback_spend(cb_info, target_ph)
+            await node_client.push_tx(spend)
+            print(f"Submitted spend to claw back coin: {coin_id}")
         finally:
+            await cb_store.close()
             node_client.close()
             wallet_client.close()
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command())
+    asyncio.get_event_loop().run_until_complete(do_command(fee, wallet_id, target_address, fingerprint))
 
 
+@cli.command(
+    "claim",
+    short_help="Claim a clawback coin after the timelock has passed",
+)
+@click.option(
+    "-c",
+    "--coin-id",
+    help="The coin ID you want to claim",
+    required=True,
+    type=str,
+)
+@click.option(
+    "-d",
+    "--fee",
+    help="The fee in mojos for this transaction",
+    required=False,
+    type=int,
+    default=0,
+)
+@click.option(
+    "-w",
+    "--wallet-id",
+    help="The wallet id for fees. If no target address given the clawback will go to this wallet id ",
+    required=False,
+    type=int,
+    default=1,
+)
+@click.option(
+    "-t",
+    "--target-address",
+    help="The address you want to send the coin to",
+    required=False,
+    type=str,
+    default=None
+)
+@common_options
+def claim_cmd(
+    coin_id: str,
+    fee: int = 0,
+    wallet_id: int = 1,
+    target_address: str = None,
+    db_path: str = "clawback.db",
+    wallet_rpc_port: Optional[int] = None,
+    fingerprint: Optional[int] = None,
+    node_rpc_port: Optional[int] = None,
+):
+    """
+    \b
+    Clawback an unclaimed coin
+    """
+    async def do_command(fee, wallet_id, target_address, fingerprint):
+        node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
+        if not fingerprint:
+            fingerprint = await wallet_client.get_logged_in_fingerprint()
+        db_file = Path(db_path) / f"clawback_{fingerprint}.db"
+        wrapper = await DBWrapper2.create(database=db_file)
+        cb_store = await CBStore.create(wrapper)
+        try:
+            manager = await CBManager.create(node_client, wallet_client, cb_store)
+            if not target_address:
+                target_address = await wallet_client.get_next_address(wallet_id, True)
+            target_ph = decode_puzzle_hash(target_address)
+            coin_record = await node_client.get_coin_record_by_name(bytes32.from_hexstr(coin_id))
+            if coin_record.spent:
+                raise ValueError("This coin has already been spent")
+            spend = await manager.create_claim_spend(coin_record.coin, target_ph)
+            await node_client.push_tx(spend)
+            print(f"Submitted spend to claim coin: {coin_id}")
+        finally:
+            await cb_store.close()
+            node_client.close()
+            wallet_client.close()
+            await node_client.await_closed()
+            await wallet_client.await_closed()
+
+    asyncio.get_event_loop().run_until_complete(do_command(fee, wallet_id, target_address, fingerprint))
+
+    
 def main() -> None:
     monkey_patch_click()
     asyncio.run(cli())  # pylint: disable=no-value-for-parameter
