@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from blspy import AugSchemeMPL, G1Element, G2Element, PrivateKey
 from chia.consensus.block_record import BlockRecord
@@ -131,15 +131,16 @@ class CBManager:
             recipient_ph,
             sender_ph,
             timelock,
-            0,
-            0,
-            0,
-            0,
+            uint32(0),
+            uint32(0),
+            False,
+            uint64(0),
         )
         await self.cb_store.add_coin_record(cb_record)
 
     async def update_coin_record(self, coin_id: bytes32) -> None:
         cb_info = await self.get_cb_info_by_id(coin_id)
+        assert isinstance(cb_info, CBInfo)
         await self.cb_store.add_coin_record(cb_info)
 
     async def update_records(self) -> None:
@@ -149,14 +150,17 @@ class CBManager:
 
     async def get_cb_coin_by_id(self, coin_id: bytes32) -> Optional[CoinRecord]:
         coin_record = await self.node_client.get_coin_record_by_name(coin_id)
-        return coin_record.coin
+        return coin_record
 
     async def get_cb_info_by_id(self, coin_id: bytes32) -> Optional[CBInfo]:
-        coin = await self.get_cb_coin_by_id(coin_id)
+        coin_record = await self.get_cb_coin_by_id(coin_id)
+        if not coin_record:
+            return None
+        else:
+            coin = coin_record.coin
         sender_ph, recipient_ph, timelock = await self.get_cb_details(coin)
         parent_cr = await self.node_client.get_coin_record_by_name(coin.parent_coin_info)
         assert isinstance(parent_cr, CoinRecord)
-        parent_ph = parent_cr.coin.puzzle_hash
         block = await self.node_client.get_block_record_by_height(parent_cr.spent_block_index)
         assert isinstance(block, BlockRecord)
         assert isinstance(block.timestamp, uint64)

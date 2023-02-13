@@ -1,14 +1,12 @@
 import asyncio
-from typing import List, Optional
-
-import click
 import time
 from pathlib import Path
+from typing import Optional
+
+import click
 from chia.types.blockchain_format.sized_bytes import bytes32
-from chia.types.spend_bundle import SpendBundle
 from chia.util.bech32m import decode_puzzle_hash
 from chia.util.db_wrapper import DBWrapper2
-from chia.util.ints import uint64
 
 from src import __version__
 from src.clients import get_node_and_wallet_clients
@@ -255,7 +253,7 @@ def show_cmd(
     help="The address you want to sent the clawed back coin to",
     required=False,
     type=str,
-    default=None
+    default=None,
 )
 @common_options
 def claw_cmd(
@@ -272,6 +270,7 @@ def claw_cmd(
     \b
     Clawback an unclaimed coin
     """
+
     async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
@@ -329,12 +328,7 @@ def claw_cmd(
     default=1,
 )
 @click.option(
-    "-t",
-    "--target-address",
-    help="The address you want to send the coin to",
-    required=False,
-    type=str,
-    default=None
+    "-t", "--target-address", help="The address you want to send the coin to", required=False, type=str, default=None
 )
 @common_options
 def claim_cmd(
@@ -351,6 +345,7 @@ def claim_cmd(
     \b
     Clawback an unclaimed coin
     """
+
     async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
@@ -378,7 +373,7 @@ def claim_cmd(
 
     asyncio.get_event_loop().run_until_complete(do_command(fee, wallet_id, target_address, fingerprint))
 
-    
+
 def main() -> None:
     monkey_patch_click()
     asyncio.run(cli())  # pylint: disable=no-value-for-parameter
