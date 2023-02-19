@@ -5,6 +5,7 @@ from chia.consensus.block_record import BlockRecord
 from chia.consensus.default_constants import DEFAULT_CONSTANTS
 from chia.rpc.full_node_rpc_client import FullNodeRpcClient
 from chia.rpc.wallet_rpc_client import WalletRpcClient
+from chia.types.announcement import Announcement
 from chia.types.blockchain_format.coin import Coin
 from chia.types.blockchain_format.program import Program
 from chia.types.blockchain_format.sized_bytes import bytes32
@@ -15,6 +16,7 @@ from chia.types.spend_bundle import SpendBundle
 from chia.util.bech32m import encode_puzzle_hash
 from chia.util.byte_types import hexstr_to_bytes
 from chia.util.condition_tools import conditions_dict_for_solution, pkm_pairs_for_conditions_dict
+from chia.util.hash import std_hash
 from chia.util.ints import uint32, uint64
 from chia.wallet.derive_keys import master_sk_to_wallet_sk, master_sk_to_wallet_sk_unhardened
 from chia.wallet.puzzles.p2_delegated_puzzle_or_hidden_puzzle import (
@@ -183,17 +185,33 @@ class CBManager:
         records = await self.cb_store.get_all_unspent_coins()
         return sorted(records, key=lambda record: record.confirmed_block_height)
 
-    async def create_clawback_spend(self, cb_info: CBInfo, to_puzzle_hash: bytes32) -> SpendBundle:
+    async def create_clawback_spend(
+        self, cb_info: CBInfo, to_puzzle_hash: bytes32, fee: uint64 = uint64(0)
+    ) -> SpendBundle:
         puzzle = self.get_cb_puzzle(cb_info.timelock, cb_info.recipient_ph, cb_info.sender_ph)
         inner_puzzle = await self.get_puzzle_for_puzzle_hash(cb_info.sender_ph)
         assert inner_puzzle.get_tree_hash() == cb_info.sender_ph
-        inner_solution = solution_for_conditions([[ConditionOpcode.CREATE_COIN, to_puzzle_hash, cb_info.coin.amount]])
+        conditions = [
+            [ConditionOpcode.CREATE_COIN, to_puzzle_hash, cb_info.coin.amount],
+        ]
+        if fee > uint64(0):
+            fee_spend = await self.create_fee_spend(fee, [])
+            fee_coin = fee_spend.removals()[0]
+            message_list = [fee_spend.removals()[0].name(), fee_spend.additions()[0].name()]
+            message = std_hash(b"".join(message_list))
+            announcement = Announcement(fee_coin.name(), message)
+            conditions.append([ConditionOpcode.ASSERT_COIN_ANNOUNCEMENT, announcement.name()])
+        inner_solution = solution_for_conditions(conditions)
         solution = create_clawback_solution(
             cb_info.timelock, cb_info.sender_ph, cb_info.recipient_ph, inner_puzzle, inner_solution
         )
         coin_spend = CoinSpend(cb_info.coin, puzzle, solution)
         spend = await self.sign_coin_spends([coin_spend])
-        return spend
+        if fee > uint64(0):
+            full_spend = SpendBundle.aggregate([spend, fee_spend])
+        else:
+            full_spend = spend
+        return full_spend
 
     async def get_cb_details(self, coin: Coin) -> Tuple:
         parent_cr = await self.node_client.get_coin_record_by_name(coin.parent_coin_info)
@@ -215,15 +233,27 @@ class CBManager:
         timelock = int_from_bytes(remark[64:])
         return sender_ph, recipient_ph, timelock
 
-    async def create_claim_spend(self, coin: Coin, claim_to: bytes32) -> SpendBundle:
+    async def create_claim_spend(self, coin: Coin, claim_to: bytes32, fee: uint64 = uint64(0)) -> SpendBundle:
         sender_ph, recipient_ph, timelock = await self.get_cb_details(coin)
         puzzle = self.get_cb_puzzle(timelock, recipient_ph, sender_ph)
         inner_puzzle = await self.get_puzzle_for_puzzle_hash(recipient_ph)
-        inner_solution = solution_for_conditions([[ConditionOpcode.CREATE_COIN, claim_to, coin.amount]])
+        conditions = [[ConditionOpcode.CREATE_COIN, claim_to, coin.amount]]
+        if fee > uint64(0):
+            fee_spend = await self.create_fee_spend(fee, [])
+            fee_coin = fee_spend.removals()[0]
+            message_list = [fee_spend.removals()[0].name(), fee_spend.additions()[0].name()]
+            message = std_hash(b"".join(message_list))
+            announcement = Announcement(fee_coin.name(), message)
+            conditions.append([ConditionOpcode.ASSERT_COIN_ANNOUNCEMENT, announcement.name()])
+        inner_solution = solution_for_conditions(conditions)
         solution = create_clawback_solution(timelock, sender_ph, recipient_ph, inner_puzzle, inner_solution)
         coin_spend = CoinSpend(coin, puzzle, solution)
         spend = await self.sign_coin_spends([coin_spend])
-        return spend
+        if fee > uint64(0):
+            full_spend = SpendBundle.aggregate([spend, fee_spend])
+        else:
+            full_spend = spend
+        return full_spend
 
     async def sign_coin_spends(self, coin_spends: List[CoinSpend]) -> SpendBundle:
         additional_data = DEFAULT_CONSTANTS.AGG_SIG_ME_ADDITIONAL_DATA
@@ -261,3 +291,15 @@ class CBManager:
         aggsig = AugSchemeMPL.aggregate(signatures)
         assert AugSchemeMPL.aggregate_verify(pk_list, msg_list, aggsig)
         return SpendBundle(coin_spends, aggsig)
+
+    async def create_fee_spend(
+        self, fee: uint64, announcements: List[Announcement], fee_wallet_id: int = 1
+    ) -> SpendBundle:
+        spendable_coins = await self.wallet_client.get_spendable_coins(fee_wallet_id, min_coin_amount=fee)
+        coin = spendable_coins[0][0].coin
+        addition = {"puzzle_hash": coin.puzzle_hash, "amount": coin.amount - fee}
+        fee_tx = await self.wallet_client.create_signed_transaction(
+            [addition], coins=[coin], coin_announcements=announcements, fee=fee
+        )
+        assert isinstance(fee_tx.spend_bundle, SpendBundle)
+        return fee_tx.spend_bundle

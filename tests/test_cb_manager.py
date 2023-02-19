@@ -178,14 +178,14 @@ async def test_clawback(
         assert list(records)[0].coin == cb_coin
 
         # Try to claim before timelock
-        early_claim = await claim_manager.create_claim_spend(cb_coin, ph_taker)
+        early_claim = await claim_manager.create_claim_spend(cb_coin, ph_taker, fee)
         with pytest.raises(ValueError) as e_info:
             await node_client.push_tx(early_claim)
         assert "ASSERT_SECONDS_RELATIVE_FAILED" in e_info.value.args[0]["error"]
 
         # Claw it back
         cb_record = records.copy().pop()
-        cb_spend = await manager.create_clawback_spend(cb_record, ph_maker)
+        cb_spend = await manager.create_clawback_spend(cb_record, ph_maker, fee)
         await node_client.push_tx(cb_spend)
         cb_coin = [coin for coin in cb_spend.additions() if coin.amount == amount][0]
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
@@ -205,12 +205,12 @@ async def test_clawback(
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
 
         start_balance = await wallet_taker.get_confirmed_balance()
-        claim_spend = await claim_manager.create_claim_spend(claim_coin, ph_taker)
+        claim_spend = await claim_manager.create_claim_spend(claim_coin, ph_taker, fee)
         await node_client.push_tx(claim_spend)
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
         end_balance = await wallet_taker.get_confirmed_balance()
-        assert start_balance + amount == end_balance
+        assert start_balance + amount - fee == end_balance
 
     finally:
         await cb_store.close()
