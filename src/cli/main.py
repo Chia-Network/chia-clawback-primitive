@@ -287,7 +287,7 @@ def claw_cmd(
             coin_record = await node_client.get_coin_record_by_name(bytes32.from_hexstr(coin_id))
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
-            spend = await manager.create_clawback_spend(cb_info, target_ph)
+            spend = await manager.create_clawback_spend(cb_info, target_ph, fee)
             await node_client.push_tx(spend)
             print(f"Submitted spend to claw back coin: {coin_id}")
         finally:
@@ -361,7 +361,7 @@ def claim_cmd(
             coin_record = await node_client.get_coin_record_by_name(bytes32.from_hexstr(coin_id))
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
-            spend = await manager.create_claim_spend(coin_record.coin, target_ph)
+            spend = await manager.create_claim_spend(coin_record.coin, target_ph, fee)
             await node_client.push_tx(spend)
             print(f"Submitted spend to claim coin: {coin_id}")
         finally:
