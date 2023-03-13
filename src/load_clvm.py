@@ -3,7 +3,7 @@ import inspect
 import pathlib
 from typing import Union
 
-from chia.types.blockchain_format.program import Program, SerializedProgram
+from chia.types.blockchain_format.program import Program
 from clvm_tools_rs import compile_clvm
 
 
@@ -29,7 +29,7 @@ def load_serialized_clvm(
     clvm_filename,
     package_or_requirement=None,
     search_paths=["clawback.clsp.include"],
-) -> SerializedProgram:
+) -> Program:
     """
     This function takes a chialisp file in the given package and compiles it to a
     .hex file if the .hex file is missing or older than the chialisp file, then
@@ -60,7 +60,7 @@ def load_serialized_clvm(
 
     clvm_hex = "".join(open(hex_filename, "r").read().split())  # Eliminate whitespace
     clvm_blob = bytes.fromhex(clvm_hex)
-    return SerializedProgram.from_bytes(clvm_blob)
+    return Program.from_bytes(clvm_blob)
 
 
 def load_clvm(clvm_filename, package_or_requirement=None, search_paths=["src.clsp.include"]) -> Program:
