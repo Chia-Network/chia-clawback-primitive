@@ -64,8 +64,8 @@ async def maker_taker_rpc(
         full_node_api.full_node.server.node_id.hex(): full_node_api.full_node.server.node_id.hex()
     }
 
-    await server_0.start_client(PeerInfo("localhost", uint16(full_node_server._port)), None)
-    await server_1.start_client(PeerInfo("localhost", uint16(full_node_server._port)), None)
+    await server_0.start_client(PeerInfo("127.0.0.1", uint16(full_node_server._port)), None)
+    await server_1.start_client(PeerInfo("127.0.0.1", uint16(full_node_server._port)), None)
 
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_maker))
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_taker))

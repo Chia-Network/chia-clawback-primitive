@@ -8,10 +8,9 @@ Clawbacks use a `p2_1_of_n` puzzle which contains a merkle root of two puzzles: 
 ## Setup
 ** NOTE: This package requires a synced node and wallet. **
 
-1. Clone this repository (and use redesign branch for now)
+1. Clone this repository
 ```shell
 git clone https://github.com/Chia-Network/chia-clawback-primitive.git
-git checkout redesign
 
 ```
 
@@ -23,7 +22,11 @@ source venv/bin/activate
 
 3. Install the clawback package and dependencies
 ```shell
-pip install .[dev]
+pip install .
+```
+If you want to edit this repo install it with dev dependencies:
+```shell
+pip install -e .[dev]
 ```
 
 4. Check it is installed correctly with:
@@ -55,7 +58,7 @@ Sends a specified amount of xch from the connected wallet to a clawback coin wit
 `-t --to` Specify the xch address of the recipient
 `-l --timelock` The timelock in seconds to use for the cb coin you're creating. Default is two weeks
 `-a --amount` The amount in mojos to send from the wallet to the clawback
-`-w --wallet-id` [Optional] The wallet id to fund the transaction from
+`-w --wallet-id` [Optional] The wallet id to fund the transaction from, currently only working/tested with xch coins
 `-d --fee` [Optional] The fee for this transaction
 
 ### show
