@@ -22,11 +22,11 @@ source venv/bin/activate
 
 3. Install the clawback package and dependencies
 ```shell
-pip install .
+pip install --extra-index-url https://pypi.chia.net/simple/ .
 ```
 If you want to edit this repo install it with dev dependencies:
 ```shell
-pip install -e .[dev]
+pip install --extra-index-url https://pypi.chia.net/simple/ -e .[dev]
 ```
 
 4. Check it is installed correctly with:
