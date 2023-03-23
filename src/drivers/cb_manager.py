@@ -16,6 +16,8 @@ from chia.types.spend_bundle import SpendBundle
 from chia.util.bech32m import encode_puzzle_hash
 from chia.util.byte_types import hexstr_to_bytes
 from chia.util.condition_tools import conditions_dict_for_solution, pkm_pairs_for_conditions_dict
+from chia.util.config import load_config
+from chia.util.default_root import DEFAULT_ROOT_PATH
 from chia.util.hash import std_hash
 from chia.util.ints import uint32, uint64
 from chia.wallet.derive_keys import master_sk_to_wallet_sk, master_sk_to_wallet_sk_unhardened
@@ -256,7 +258,12 @@ class CBManager:
         return full_spend
 
     async def sign_coin_spends(self, coin_spends: List[CoinSpend]) -> SpendBundle:
-        additional_data = DEFAULT_CONSTANTS.AGG_SIG_ME_ADDITIONAL_DATA
+        config = load_config(DEFAULT_ROOT_PATH, "config.yaml")
+        if config.get("selected_network") == "testnet10":
+            additional_data = config["network_overrides"]["constants"]["testnet10"]["AGG_SIG_ME_ADDITIONAL_DATA"]
+        else:
+            additional_data = DEFAULT_CONSTANTS.AGG_SIG_ME_ADDITIONAL_DATA
+
         signatures: List[G2Element] = []
         pk_list: List[G1Element] = []
         msg_list: List[bytes] = []

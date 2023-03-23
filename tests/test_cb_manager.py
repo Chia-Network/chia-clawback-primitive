@@ -83,7 +83,7 @@ async def maker_taker_rpc(
     full_node_rpc_api = FullNodeRpcApi(full_node_api.full_node)
 
     rpc_server_node = await start_rpc_server(
-        full_node_rpc_api,
+        full_node_rpc_api,  # type: ignore
         self_hostname,
         daemon_port,
         uint16(0),
