@@ -144,8 +144,9 @@ class CBManager:
 
     async def update_coin_record(self, coin_id: bytes32) -> None:
         cb_info = await self.get_cb_info_by_id(coin_id)
-        assert isinstance(cb_info, CBInfo)
-        await self.cb_store.add_coin_record(cb_info)
+        if cb_info:
+            assert isinstance(cb_info, CBInfo)
+            await self.cb_store.add_coin_record(cb_info)
 
     async def update_records(self) -> None:
         records = await self.cb_store.get_all_unspent_coins()
@@ -260,7 +261,8 @@ class CBManager:
     async def sign_coin_spends(self, coin_spends: List[CoinSpend]) -> SpendBundle:
         config = load_config(DEFAULT_ROOT_PATH, "config.yaml")
         if config.get("selected_network") == "testnet10":
-            additional_data = config["network_overrides"]["constants"]["testnet10"]["AGG_SIG_ME_ADDITIONAL_DATA"]
+            hex_data = config["network_overrides"]["constants"]["testnet10"]["AGG_SIG_ME_ADDITIONAL_DATA"]
+            additional_data = bytes.fromhex(hex_data)
         else:
             additional_data = DEFAULT_CONSTANTS.AGG_SIG_ME_ADDITIONAL_DATA
 

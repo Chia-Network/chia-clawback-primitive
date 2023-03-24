@@ -1,12 +1,16 @@
 import asyncio
 import time
 from pathlib import Path
+from secrets import token_bytes
 from typing import Optional
 
 import click
 from chia.types.blockchain_format.sized_bytes import bytes32
 from chia.util.bech32m import decode_puzzle_hash
 from chia.util.db_wrapper import DBWrapper2
+from chia.util.ints import uint32, uint64
+from chia.wallet.transaction_record import TransactionRecord
+from chia.wallet.util.transaction_type import TransactionType
 
 from src import __version__
 from src.clients import get_node_and_wallet_clients
@@ -140,11 +144,33 @@ def create_cmd(
             sender_addr = await wallet_client.get_next_address(wallet_id, True)
             sender_ph = decode_puzzle_hash(sender_addr)
             spend = await manager.create_cb_coin(amount, recipient_ph, sender_ph, timelock, fee=fee)
-            await node_client.push_tx(spend)
             cb_coin = [coin for coin in spend.additions() if coin.amount == amount][0]
-            await manager.add_new_coin(cb_coin, recipient_ph, sender_ph, timelock)
-            print("Created Coin with ID: {}".format(cb_coin.name().hex()))
-            print(cb_coin)
+            tx = TransactionRecord(
+                confirmed_at_height=uint32(0),
+                created_at_time=uint64(time.time()),
+                to_puzzle_hash=cb_coin.puzzle_hash,
+                amount=uint64(amount),
+                fee_amount=uint64(fee),
+                confirmed=False,
+                sent=uint32(10),
+                spend_bundle=spend,
+                additions=spend.additions(),
+                removals=spend.removals(),
+                wallet_id=wallet_id,
+                sent_to=[],
+                trade_id=None,
+                type=uint32(TransactionType.INCOMING_TX.value),
+                name=bytes32(token_bytes(32)),
+                memos=[],
+            )
+            res = await wallet_client.push_transactions([tx])
+            if res["success"]:
+                cb_coin = [coin for coin in spend.additions() if coin.amount == amount][0]
+                await manager.add_new_coin(cb_coin, recipient_ph, sender_ph, timelock)
+                print("Created Coin with ID: {}".format(cb_coin.name().hex()))
+                print(cb_coin)
+            else:
+                print(f"Failed to create clawback coin: {res}")
         finally:
             await cb_store.close()
             node_client.close()
@@ -287,9 +313,31 @@ def claw_cmd(
             coin_record = await node_client.get_coin_record_by_name(bytes32.from_hexstr(coin_id))
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
+            cb_coin = coin_record.coin
             spend = await manager.create_clawback_spend(cb_info, target_ph, fee)
-            await node_client.push_tx(spend)
-            print(f"Submitted spend to claw back coin: {coin_id}")
+            tx = TransactionRecord(
+                confirmed_at_height=uint32(0),
+                created_at_time=uint64(time.time()),
+                to_puzzle_hash=target_ph,
+                amount=uint64(cb_coin.amount),
+                fee_amount=uint64(fee),
+                confirmed=False,
+                sent=uint32(10),
+                spend_bundle=spend,
+                additions=spend.additions(),
+                removals=spend.removals(),
+                wallet_id=wallet_id,
+                sent_to=[],
+                trade_id=None,
+                type=uint32(TransactionType.INCOMING_TX.value),
+                name=bytes32(token_bytes(32)),
+                memos=[],
+            )
+            res = await wallet_client.push_transactions([tx])
+            if res["success"]:
+                print(f"Submitted spend to claw back coin: {coin_id}")
+            else:
+                print(f"Failed to submit clawback spend: {res}")
         finally:
             await cb_store.close()
             node_client.close()
@@ -343,7 +391,7 @@ def claim_cmd(
 ):
     """
     \b
-    Clawback an unclaimed coin
+    Claim a clawback coin as recipient
     """
 
     async def do_command(fee, wallet_id, target_address, fingerprint):
@@ -361,9 +409,31 @@ def claim_cmd(
             coin_record = await node_client.get_coin_record_by_name(bytes32.from_hexstr(coin_id))
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
+            cb_coin = coin_record.coin
             spend = await manager.create_claim_spend(coin_record.coin, target_ph, fee)
-            await node_client.push_tx(spend)
-            print(f"Submitted spend to claim coin: {coin_id}")
+            tx = TransactionRecord(
+                confirmed_at_height=uint32(0),
+                created_at_time=uint64(time.time()),
+                to_puzzle_hash=target_ph,
+                amount=uint64(cb_coin.amount),
+                fee_amount=uint64(fee),
+                confirmed=False,
+                sent=uint32(10),
+                spend_bundle=spend,
+                additions=spend.additions(),
+                removals=spend.removals(),
+                wallet_id=wallet_id,
+                sent_to=[],
+                trade_id=None,
+                type=uint32(TransactionType.INCOMING_TX.value),
+                name=bytes32(token_bytes(32)),
+                memos=[],
+            )
+            res = await wallet_client.push_transactions([tx])
+            if res["success"]:
+                print(f"Submitted spend to claim coin: {coin_id}")
+            else:
+                print(f"Failed to submit clawback claim spend: {res}")
         finally:
             await cb_store.close()
             node_client.close()
