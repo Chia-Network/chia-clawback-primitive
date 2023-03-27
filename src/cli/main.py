@@ -18,6 +18,7 @@ from src.drivers.cb_manager import TWO_WEEKS, CBManager
 from src.drivers.cb_store import CBStore
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
+MOJO_CONST = 1000000000000
 
 
 def monkey_patch_click() -> None:
@@ -94,9 +95,9 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "-a",
     "--amount",
-    help="The amount to fund",
+    help="The amount to fund in XCH",
     required=True,
-    type=int,
+    type=str,
 )
 @click.option(
     "-w",
@@ -109,18 +110,18 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "-m",
     "--fee",
-    help="The fee for the funding transaction",
+    help="The fee in XCH",
     required=False,
-    type=int,
-    default=0,
+    type=str,
+    default="0",
 )
 @common_options
 def create_cmd(
     to: str,
     timelock: int,
-    amount: int,
+    amount: str,
     wallet_id: int,
-    fee: int = 0,
+    fee: str = "0",
     db_path: str = "",
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
@@ -130,7 +131,8 @@ def create_cmd(
     \b
     Make a transaction to create a clawback coin
     """
-
+    amount = int(float(amount) * MOJO_CONST)
+    fee = int(float(fee) * MOJO_CONST)
     async def do_command(fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
@@ -234,7 +236,7 @@ def show_cmd(
                         time_left = "pending"
                     print("\n")
                     print(f"Coin ID: {record.coin.name().hex()}")
-                    print(f"Amount: {record.coin.amount} mojos")
+                    print(f"Amount: {record.coin.amount / MOJO_CONST} XCH ({record.coin.amount} mojos)")
                     print(f"Timelock: {record.timelock} seconds")
                     if time_left == "pending":
                         print(f"Time left: pending")
@@ -266,10 +268,10 @@ def show_cmd(
 @click.option(
     "-m",
     "--fee",
-    help="The fee in mojos for this transaction",
+    help="The fee in XCH for this transaction",
     required=False,
-    type=int,
-    default=0,
+    type=str,
+    default="0",
 )
 @click.option(
     "-w",
@@ -290,7 +292,7 @@ def show_cmd(
 @common_options
 def claw_cmd(
     coin_id: str,
-    fee: int = 0,
+    fee: str = "",
     wallet_id: int = 1,
     target_address: Optional[str] = None,
     db_path: str = "clawback.db",
@@ -302,7 +304,7 @@ def claw_cmd(
     \b
     Clawback an unclaimed coin
     """
-
+    fee = int(float(fee) * MOJO_CONST)
     async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
@@ -368,10 +370,10 @@ def claw_cmd(
 @click.option(
     "-m",
     "--fee",
-    help="The fee in mojos for this transaction",
+    help="The fee in XCH for this transaction",
     required=False,
-    type=int,
-    default=0,
+    type=str,
+    default="0",
 )
 @click.option(
     "-w",
@@ -387,7 +389,7 @@ def claw_cmd(
 @common_options
 def claim_cmd(
     coin_id: str,
-    fee: int = 0,
+    fee: str = "0",
     wallet_id: int = 1,
     target_address: Optional[str] = None,
     db_path: str = "clawback.db",
@@ -399,7 +401,7 @@ def claim_cmd(
     \b
     Claim a clawback coin as recipient
     """
-
+    fee = int(float(fee) * MOJO_CONST)
     async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
