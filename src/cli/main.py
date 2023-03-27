@@ -226,14 +226,20 @@ def show_cmd(
             if records:
                 for record in records:
                     block = await node_client.get_block_record_by_height(record.confirmed_block_height)
-                    time_left = int(record.timelock - (current_time - block.timestamp))
-                    if time_left <= 0:
-                        time_left = 0
+                    if block.height > 0:
+                        time_left = int(record.timelock - (current_time - block.timestamp))
+                        if time_left <= 0:
+                            time_left = 0
+                    else:
+                        time_left = "pending"
                     print("\n")
                     print(f"Coin ID: {record.coin.name().hex()}")
                     print(f"Amount: {record.coin.amount} mojos")
                     print(f"Timelock: {record.timelock} seconds")
-                    print(f"Time left: {time_left} seconds")
+                    if time_left == "pending":
+                        print(f"Time left: pending")
+                    else:
+                        print(f"Time left: {time_left} seconds")
             else:
                 print("No coins found")
         finally:
