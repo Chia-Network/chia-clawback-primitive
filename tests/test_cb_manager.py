@@ -212,6 +212,14 @@ async def test_clawback(
         end_balance = await wallet_taker.get_confirmed_balance()
         assert start_balance + amount - fee == end_balance
 
+        # Create a clawback with multiple xch coins
+        spendable_balance = await wallet_maker.get_confirmed_balance()
+        coins = await wallet_maker.select_coins(spendable_balance)
+        assert len(coins) > 1
+        cb = await manager.create_cb_coin(spendable_balance, ph_taker, ph_maker, timelock, fee=0)
+        res = await node_client.push_tx(cb)
+        assert res["success"]
+
     finally:
         await cb_store.close()
         await claim_cb_store.close()

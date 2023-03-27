@@ -106,27 +106,58 @@ class CBManager:
         fee: uint64 = uint64(0),
         wallet_id: int = 1,
     ) -> SpendBundle:
-        coins = await self.wallet_client.select_coins(amount, wallet_id, min_coin_amount=uint64(amount + fee))
-        if not coins:
-            raise ValueError("Insufficient funds")
-        if len(coins) != 1:
-            raise ValueError(f"No coins large enough, create a coin with amount {amount+fee} mojos")
-        coin = coins[0]
-        private_key, index, hardened = await self.get_keys_for_puzzle_hash(coin.puzzle_hash)
-        pk = private_key.get_g1()
-        puzzle = puzzle_for_pk(pk)
-        assert puzzle.get_tree_hash() == coin.puzzle_hash
+        total_amount = amount + fee
+        coins = await self.wallet_client.select_coins(total_amount, wallet_id)
+        assert len(coins) > 0
+        spend_value = sum([coin.amount for coin in coins])
+        change = spend_value - total_amount
+        assert change >= 0
+
+        spends: List[CoinSpend] = []
+        primary_announcement_hash: Optional[bytes32] = None
+        message_list: List[bytes32] = [c.name() for c in coins]
+        origin_coin = coins.copy().pop()
+        origin_id = origin_coin.name()
+
         cb_puzzle_hash = self.get_cb_puzzle_hash(timelock, recipient_ph, sender_ph)
+        cb_coin = Coin(origin_id, cb_puzzle_hash, amount)
+        message_list.append(cb_coin.name())
+        message = std_hash(b"".join(message_list))
+        announcement_hash = Announcement(origin_coin.name(), message).name()
+
+        secret_key, index, hardened = await self.get_keys_for_puzzle_hash(origin_coin.puzzle_hash)
+        pk = secret_key.get_g1()
+        puzzle = puzzle_for_pk(pk)
+        assert puzzle.get_tree_hash() == origin_coin.puzzle_hash
         remark = sender_ph + recipient_ph + int_to_bytes(timelock)
         conditions = [
             [ConditionOpcode.CREATE_COIN, cb_puzzle_hash, amount],
-            [ConditionOpcode.CREATE_COIN, coin.puzzle_hash, coin.amount - amount - fee],
             [ConditionOpcode.RESERVE_FEE, fee],
             [ConditionOpcode.REMARK, remark],
+            [ConditionOpcode.CREATE_COIN_ANNOUNCEMENT, message]
         ]
+        if change > 0:
+            conditions.append([ConditionOpcode.CREATE_COIN, origin_coin.puzzle_hash, change])
+
         solution = solution_for_conditions(conditions)
-        coin_spend = CoinSpend(coin, puzzle, solution)
-        spend = await self.sign_coin_spends([coin_spend])
+        coin_spend = CoinSpend(origin_coin, puzzle, solution)
+        spends.append(coin_spend)
+
+        # Create the solutions for the rest of the xch coins
+        for coin in coins:
+            if coin.name() == origin_id:
+                continue
+            secret_key, index, hardened = await self.get_keys_for_puzzle_hash(coin.puzzle_hash)
+            pk = secret_key.get_g1()
+            puzzle = puzzle_for_pk(pk)
+            conditions = [
+                [ConditionOpcode.ASSERT_COIN_ANNOUNCEMENT, announcement_hash]
+            ]
+            solution = solution_for_conditions(conditions)
+            coin_spend = CoinSpend(coin, puzzle, solution)
+            spends.append(coin_spend)
+
+        spend = await self.sign_coin_spends(spends)
         return spend
 
     async def add_new_coin(self, coin: Coin, recipient_ph: bytes32, sender_ph: bytes32, timelock: uint64) -> None:
