@@ -107,7 +107,7 @@ def cli(ctx: click.Context) -> None:
     default=1,
 )
 @click.option(
-    "-d",
+    "-m",
     "--fee",
     help="The fee for the funding transaction",
     required=False,
@@ -264,7 +264,7 @@ def show_cmd(
     type=str,
 )
 @click.option(
-    "-d",
+    "-m",
     "--fee",
     help="The fee in mojos for this transaction",
     required=False,
@@ -366,7 +366,7 @@ def claw_cmd(
     type=str,
 )
 @click.option(
-    "-d",
+    "-m",
     "--fee",
     help="The fee in mojos for this transaction",
     required=False,
