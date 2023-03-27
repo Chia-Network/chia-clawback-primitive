@@ -417,29 +417,16 @@ def claim_cmd(
                 raise ValueError("This coin has already been spent")
             cb_coin = coin_record.coin
             spend = await manager.create_claim_spend(coin_record.coin, target_ph, fee)
-            tx = TransactionRecord(
-                confirmed_at_height=uint32(0),
-                created_at_time=uint64(time.time()),
-                to_puzzle_hash=target_ph,
-                amount=uint64(cb_coin.amount),
-                fee_amount=uint64(fee),
-                confirmed=False,
-                sent=uint32(10),
-                spend_bundle=spend,
-                additions=spend.additions(),
-                removals=spend.removals(),
-                wallet_id=wallet_id,
-                sent_to=[],
-                trade_id=None,
-                type=uint32(TransactionType.INCOMING_TX.value),
-                name=bytes32(token_bytes(32)),
-                memos=[],
-            )
-            res = await wallet_client.push_transactions([tx])
-            if res["success"]:
+
+            try:
+                await node_client.push_tx(spend)
                 print(f"Submitted spend to claim coin: {coin_id}")
-            else:
-                print(f"Failed to submit clawback claim spend: {res}")
+            except ValueError as e:
+                if "ASSERT_SECONDS_RELATIVE_FAILED" in e.args[0]["error"]:
+                    print("You are trying to claim the coin too early")
+                else:
+                    print(f"Error: {e}")
+
         finally:
             await cb_store.close()
             node_client.close()
