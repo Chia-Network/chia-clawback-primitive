@@ -64,8 +64,8 @@ async def maker_taker_rpc(
         full_node_api.full_node.server.node_id.hex(): full_node_api.full_node.server.node_id.hex()
     }
 
-    await server_0.start_client(PeerInfo("localhost", uint16(full_node_server._port)), None)
-    await server_1.start_client(PeerInfo("localhost", uint16(full_node_server._port)), None)
+    await server_0.start_client(PeerInfo("127.0.0.1", uint16(full_node_server._port)), None)
+    await server_1.start_client(PeerInfo("127.0.0.1", uint16(full_node_server._port)), None)
 
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_maker))
     await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_taker))
@@ -83,7 +83,7 @@ async def maker_taker_rpc(
     full_node_rpc_api = FullNodeRpcApi(full_node_api.full_node)
 
     rpc_server_node = await start_rpc_server(
-        full_node_rpc_api,
+        full_node_rpc_api,  # type: ignore
         self_hostname,
         daemon_port,
         uint16(0),
@@ -211,6 +211,14 @@ async def test_clawback(
         await full_node_api.farm_new_transaction_block(FarmNewBlockProtocol(ph_token))
         end_balance = await wallet_taker.get_confirmed_balance()
         assert start_balance + amount - fee == end_balance
+
+        # Create a clawback with multiple xch coins
+        spendable_balance = await wallet_maker.get_confirmed_balance()
+        coins = await wallet_maker.select_coins(spendable_balance)
+        assert len(coins) > 1
+        cb = await manager.create_cb_coin(spendable_balance, ph_taker, ph_maker, timelock, fee=0)
+        res = await node_client.push_tx(cb)
+        assert res["success"]
 
     finally:
         await cb_store.close()
