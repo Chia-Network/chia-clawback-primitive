@@ -1,5 +1,6 @@
 import asyncio
 import time
+from decimal import Decimal
 from pathlib import Path
 from secrets import token_bytes
 from typing import Optional
@@ -131,9 +132,10 @@ def create_cmd(
     \b
     Make a transaction to create a clawback coin
     """
-    amount = int(float(amount) * MOJO_CONST)
-    fee = int(float(fee) * MOJO_CONST)
-    async def do_command(fingerprint):
+    final_amount = int(Decimal(amount) * MOJO_CONST)
+    final_fee = int(Decimal(fee) * MOJO_CONST)
+
+    async def do_command(fingerprint, final_amount, final_fee):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
             fingerprint = await wallet_client.get_logged_in_fingerprint()
@@ -145,14 +147,14 @@ def create_cmd(
             recipient_ph = decode_puzzle_hash(to)
             sender_addr = await wallet_client.get_next_address(wallet_id, True)
             sender_ph = decode_puzzle_hash(sender_addr)
-            spend = await manager.create_cb_coin(amount, recipient_ph, sender_ph, timelock, fee=fee)
-            cb_coin = [coin for coin in spend.additions() if coin.amount == amount][0]
+            spend = await manager.create_cb_coin(final_amount, recipient_ph, sender_ph, timelock, fee=final_fee)
+            cb_coin = [coin for coin in spend.additions() if coin.amount == final_amount][0]
             tx = TransactionRecord(
                 confirmed_at_height=uint32(0),
                 created_at_time=uint64(time.time()),
                 to_puzzle_hash=cb_coin.puzzle_hash,
-                amount=uint64(amount),
-                fee_amount=uint64(fee),
+                amount=uint64(final_amount),
+                fee_amount=uint64(final_fee),
                 confirmed=False,
                 sent=uint32(10),
                 spend_bundle=spend,
@@ -167,7 +169,7 @@ def create_cmd(
             )
             res = await wallet_client.push_transactions([tx])
             if res["success"]:
-                cb_coin = [coin for coin in spend.additions() if coin.amount == amount][0]
+                cb_coin = [coin for coin in spend.additions() if coin.amount == final_amount][0]
                 await manager.add_new_coin(cb_coin, recipient_ph, sender_ph, timelock)
                 print("Created Coin with ID: {}".format(cb_coin.name().hex()))
                 print(cb_coin)
@@ -180,7 +182,7 @@ def create_cmd(
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command(fingerprint))
+    asyncio.get_event_loop().run_until_complete(do_command(fingerprint, final_amount, final_fee))
 
 
 @cli.command(
@@ -239,7 +241,7 @@ def show_cmd(
                     print(f"Amount: {record.coin.amount / MOJO_CONST} XCH ({record.coin.amount} mojos)")
                     print(f"Timelock: {record.timelock} seconds")
                     if time_left == "pending":
-                        print(f"Time left: pending")
+                        print("Time left: pending")
                     else:
                         print(f"Time left: {time_left} seconds")
             else:
@@ -304,8 +306,9 @@ def claw_cmd(
     \b
     Clawback an unclaimed coin
     """
-    fee = int(float(fee) * MOJO_CONST)
-    async def do_command(fee, wallet_id, target_address, fingerprint):
+    final_fee: int = int(Decimal(fee) * MOJO_CONST)
+
+    async def do_command(final_fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
             fingerprint = await wallet_client.get_logged_in_fingerprint()
@@ -322,13 +325,13 @@ def claw_cmd(
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
             cb_coin = coin_record.coin
-            spend = await manager.create_clawback_spend(cb_info, target_ph, fee)
+            spend = await manager.create_clawback_spend(cb_info, target_ph, final_fee)
             tx = TransactionRecord(
                 confirmed_at_height=uint32(0),
                 created_at_time=uint64(time.time()),
                 to_puzzle_hash=target_ph,
                 amount=uint64(cb_coin.amount),
-                fee_amount=uint64(fee),
+                fee_amount=uint64(final_fee),
                 confirmed=False,
                 sent=uint32(10),
                 spend_bundle=spend,
@@ -353,7 +356,7 @@ def claw_cmd(
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command(fee, wallet_id, target_address, fingerprint))
+    asyncio.get_event_loop().run_until_complete(do_command(final_fee, wallet_id, target_address, fingerprint))
 
 
 @cli.command(
@@ -401,8 +404,9 @@ def claim_cmd(
     \b
     Claim a clawback coin as recipient
     """
-    fee = int(float(fee) * MOJO_CONST)
-    async def do_command(fee, wallet_id, target_address, fingerprint):
+    final_fee: int = int(Decimal(fee) * MOJO_CONST)
+
+    async def do_command(final_fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
             fingerprint = await wallet_client.get_logged_in_fingerprint()
@@ -418,11 +422,11 @@ def claim_cmd(
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
             cb_coin = coin_record.coin
-            spend = await manager.create_claim_spend(coin_record.coin, target_ph, fee)
+            spend = await manager.create_claim_spend(coin_record.coin, target_ph, final_fee)
 
             try:
                 await node_client.push_tx(spend)
-                print(f"Submitted spend to claim coin: {coin_id}")
+                print(f"Submitted spend to claim coin: {cb_coin.name()}")
             except ValueError as e:
                 if "ASSERT_SECONDS_RELATIVE_FAILED" in e.args[0]["error"]:
                     print("You are trying to claim the coin too early")
@@ -436,7 +440,7 @@ def claim_cmd(
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command(fee, wallet_id, target_address, fingerprint))
+    asyncio.get_event_loop().run_until_complete(do_command(final_fee, wallet_id, target_address, fingerprint))
 
 
 def main() -> None:
