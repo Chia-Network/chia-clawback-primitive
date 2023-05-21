@@ -257,9 +257,9 @@ class CBManager:
         puzzle = parent_spend.puzzle_reveal.to_program()
         solution = parent_spend.solution.to_program()
         conditions = conditions_dict_for_solution(puzzle, solution, DEFAULT_CONSTANTS.MAX_BLOCK_COST_CLVM)
-        assert isinstance(conditions[1], Dict)
-        if ConditionOpcode.REMARK in conditions[1].keys():
-            remark = conditions[1][ConditionOpcode.REMARK][0].vars[0]
+        assert isinstance(conditions, Dict)
+        if ConditionOpcode.REMARK in conditions.keys():
+            remark = conditions[ConditionOpcode.REMARK][0].vars[0]
         else:
             raise ValueError("Coin doess not contain a valid clawback puzzle")
         sender_ph = bytes32(remark[:32])
@@ -310,10 +310,10 @@ class CBManager:
                 private_key, index, hardened = await self.get_keys_for_puzzle_hash(inner_puz.get_tree_hash())
             synthetic_secret_key = calculate_synthetic_secret_key(private_key, DEFAULT_HIDDEN_PUZZLE_HASH)
 
-            err, conditions_dict, cost = conditions_dict_for_solution(
+            conditions_dict = conditions_dict_for_solution(
                 coin_spend.puzzle_reveal, coin_spend.solution, DEFAULT_CONSTANTS.MAX_BLOCK_COST_CLVM
             )
-            if err or conditions_dict is None:
+            if conditions_dict is None:
                 error_msg = f"Sign transaction failed, con:{conditions_dict}, error: {err}"
                 raise ValueError(error_msg)
 
