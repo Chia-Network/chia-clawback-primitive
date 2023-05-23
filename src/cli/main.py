@@ -96,6 +96,7 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "-a",
     "--amount",
+    "amount_str",
     help="The amount to fund in XCH",
     required=True,
     type=str,
@@ -111,6 +112,7 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "-m",
     "--fee",
+    "fee_str",
     help="The fee in XCH",
     required=False,
     type=str,
@@ -120,9 +122,9 @@ def cli(ctx: click.Context) -> None:
 def create_cmd(
     to: str,
     timelock: int,
-    amount: str,
+    amount_str: str,
     wallet_id: int,
-    fee: str = "0",
+    fee_str: str = "0",
     db_path: str = "",
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
@@ -132,10 +134,10 @@ def create_cmd(
     \b
     Make a transaction to create a clawback coin
     """
-    final_amount = int(Decimal(amount) * MOJO_CONST)
-    final_fee = int(Decimal(fee) * MOJO_CONST)
+    amount = int(Decimal(amount_str) * MOJO_CONST)
+    fee = int(Decimal(fee_str) * MOJO_CONST)
 
-    async def do_command(fingerprint, final_amount, final_fee):
+    async def do_command(fingerprint, amount, fee):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
             fingerprint = await wallet_client.get_logged_in_fingerprint()
@@ -147,14 +149,14 @@ def create_cmd(
             recipient_ph = decode_puzzle_hash(to)
             sender_addr = await wallet_client.get_next_address(wallet_id, True)
             sender_ph = decode_puzzle_hash(sender_addr)
-            spend = await manager.create_cb_coin(final_amount, recipient_ph, sender_ph, timelock, fee=final_fee)
-            cb_coin = [coin for coin in spend.additions() if coin.amount == final_amount][0]
+            spend = await manager.create_cb_coin(amount, recipient_ph, sender_ph, timelock, fee=fee)
+            cb_coin = [coin for coin in spend.additions() if coin.amount == amount][0]
             tx = TransactionRecord(
                 confirmed_at_height=uint32(0),
                 created_at_time=uint64(time.time()),
                 to_puzzle_hash=cb_coin.puzzle_hash,
-                amount=uint64(final_amount),
-                fee_amount=uint64(final_fee),
+                amount=uint64(amount),
+                fee_amount=uint64(fee),
                 confirmed=False,
                 sent=uint32(10),
                 spend_bundle=spend,
@@ -169,7 +171,7 @@ def create_cmd(
             )
             res = await wallet_client.push_transactions([tx])
             if res["success"]:
-                cb_coin = [coin for coin in spend.additions() if coin.amount == final_amount][0]
+                cb_coin = [coin for coin in spend.additions() if coin.amount == amount][0]
                 await manager.add_new_coin(cb_coin, recipient_ph, sender_ph, timelock)
                 print("Created Coin with ID: {}".format(cb_coin.name().hex()))
                 print(cb_coin)
@@ -182,7 +184,7 @@ def create_cmd(
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command(fingerprint, final_amount, final_fee))
+    asyncio.get_event_loop().run_until_complete(do_command(fingerprint, amount, fee))
 
 
 @cli.command(

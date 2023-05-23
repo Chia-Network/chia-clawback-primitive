@@ -310,7 +310,6 @@ class CBManager:
             conditions_dict = conditions_dict_for_solution(
                 coin_spend.puzzle_reveal, coin_spend.solution, DEFAULT_CONSTANTS.MAX_BLOCK_COST_CLVM
             )
-            assert conditions_dict
 
             # Create signature
             for pk_bytes, msg in pkm_pairs_for_conditions_dict(
