@@ -272,6 +272,7 @@ def show_cmd(
 @click.option(
     "-m",
     "--fee",
+    "fee_str",
     help="The fee in XCH for this transaction",
     required=False,
     type=str,
@@ -296,7 +297,7 @@ def show_cmd(
 @common_options
 def claw_cmd(
     coin_id: str,
-    fee: str = "",
+    fee_str: str = "",
     wallet_id: int = 1,
     target_address: Optional[str] = None,
     db_path: str = "clawback.db",
@@ -308,9 +309,9 @@ def claw_cmd(
     \b
     Clawback an unclaimed coin
     """
-    final_fee: int = int(Decimal(fee) * MOJO_CONST)
+    fee: int = int(Decimal(fee_str) * MOJO_CONST)
 
-    async def do_command(final_fee, wallet_id, target_address, fingerprint):
+    async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
             fingerprint = await wallet_client.get_logged_in_fingerprint()
@@ -327,13 +328,13 @@ def claw_cmd(
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
             cb_coin = coin_record.coin
-            spend = await manager.create_clawback_spend(cb_info, target_ph, final_fee)
+            spend = await manager.create_clawback_spend(cb_info, target_ph, fee)
             tx = TransactionRecord(
                 confirmed_at_height=uint32(0),
                 created_at_time=uint64(time.time()),
                 to_puzzle_hash=target_ph,
                 amount=uint64(cb_coin.amount),
-                fee_amount=uint64(final_fee),
+                fee_amount=uint64(fee),
                 confirmed=False,
                 sent=uint32(10),
                 spend_bundle=spend,
@@ -358,7 +359,7 @@ def claw_cmd(
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command(final_fee, wallet_id, target_address, fingerprint))
+    asyncio.get_event_loop().run_until_complete(do_command(fee, wallet_id, target_address, fingerprint))
 
 
 @cli.command(
@@ -375,6 +376,7 @@ def claw_cmd(
 @click.option(
     "-m",
     "--fee",
+    "fee_str",
     help="The fee in XCH for this transaction",
     required=False,
     type=str,
@@ -394,7 +396,7 @@ def claw_cmd(
 @common_options
 def claim_cmd(
     coin_id: str,
-    fee: str = "0",
+    fee_str: str = "0",
     wallet_id: int = 1,
     target_address: Optional[str] = None,
     db_path: str = "clawback.db",
@@ -406,9 +408,9 @@ def claim_cmd(
     \b
     Claim a clawback coin as recipient
     """
-    final_fee: int = int(Decimal(fee) * MOJO_CONST)
+    fee: int = int(Decimal(fee_str) * MOJO_CONST)
 
-    async def do_command(final_fee, wallet_id, target_address, fingerprint):
+    async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
             fingerprint = await wallet_client.get_logged_in_fingerprint()
@@ -424,7 +426,7 @@ def claim_cmd(
             if coin_record.spent:
                 raise ValueError("This coin has already been spent")
             cb_coin = coin_record.coin
-            spend = await manager.create_claim_spend(coin_record.coin, target_ph, final_fee)
+            spend = await manager.create_claim_spend(coin_record.coin, target_ph, fee)
 
             try:
                 await node_client.push_tx(spend)
@@ -442,7 +444,7 @@ def claim_cmd(
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command(final_fee, wallet_id, target_address, fingerprint))
+    asyncio.get_event_loop().run_until_complete(do_command(fee, wallet_id, target_address, fingerprint))
 
 
 def main() -> None:
