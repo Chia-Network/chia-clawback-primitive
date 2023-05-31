@@ -1,5 +1,6 @@
 import asyncio
 import time
+from decimal import Decimal
 from pathlib import Path
 from secrets import token_bytes
 from typing import Optional
@@ -95,6 +96,7 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "-a",
     "--amount",
+    "amount_str",
     help="The amount to fund in XCH",
     required=True,
     type=str,
@@ -110,6 +112,7 @@ def cli(ctx: click.Context) -> None:
 @click.option(
     "-m",
     "--fee",
+    "fee_str",
     help="The fee in XCH",
     required=False,
     type=str,
@@ -119,9 +122,9 @@ def cli(ctx: click.Context) -> None:
 def create_cmd(
     to: str,
     timelock: int,
-    amount: str,
+    amount_str: str,
     wallet_id: int,
-    fee: str = "0",
+    fee_str: str = "0",
     db_path: str = "",
     wallet_rpc_port: Optional[int] = None,
     fingerprint: Optional[int] = None,
@@ -131,9 +134,10 @@ def create_cmd(
     \b
     Make a transaction to create a clawback coin
     """
-    amount = int(float(amount) * MOJO_CONST)
-    fee = int(float(fee) * MOJO_CONST)
-    async def do_command(fingerprint):
+    amount = int(Decimal(amount_str) * MOJO_CONST)
+    fee = int(Decimal(fee_str) * MOJO_CONST)
+
+    async def do_command(fingerprint, amount, fee):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
             fingerprint = await wallet_client.get_logged_in_fingerprint()
@@ -180,7 +184,7 @@ def create_cmd(
             await node_client.await_closed()
             await wallet_client.await_closed()
 
-    asyncio.get_event_loop().run_until_complete(do_command(fingerprint))
+    asyncio.get_event_loop().run_until_complete(do_command(fingerprint, amount, fee))
 
 
 @cli.command(
@@ -239,7 +243,7 @@ def show_cmd(
                     print(f"Amount: {record.coin.amount / MOJO_CONST} XCH ({record.coin.amount} mojos)")
                     print(f"Timelock: {record.timelock} seconds")
                     if time_left == "pending":
-                        print(f"Time left: pending")
+                        print("Time left: pending")
                     else:
                         print(f"Time left: {time_left} seconds")
             else:
@@ -268,6 +272,7 @@ def show_cmd(
 @click.option(
     "-m",
     "--fee",
+    "fee_str",
     help="The fee in XCH for this transaction",
     required=False,
     type=str,
@@ -292,7 +297,7 @@ def show_cmd(
 @common_options
 def claw_cmd(
     coin_id: str,
-    fee: str = "",
+    fee_str: str = "",
     wallet_id: int = 1,
     target_address: Optional[str] = None,
     db_path: str = "clawback.db",
@@ -304,7 +309,8 @@ def claw_cmd(
     \b
     Clawback an unclaimed coin
     """
-    fee = int(float(fee) * MOJO_CONST)
+    fee: int = int(Decimal(fee_str) * MOJO_CONST)
+
     async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
@@ -370,6 +376,7 @@ def claw_cmd(
 @click.option(
     "-m",
     "--fee",
+    "fee_str",
     help="The fee in XCH for this transaction",
     required=False,
     type=str,
@@ -389,7 +396,7 @@ def claw_cmd(
 @common_options
 def claim_cmd(
     coin_id: str,
-    fee: str = "0",
+    fee_str: str = "0",
     wallet_id: int = 1,
     target_address: Optional[str] = None,
     db_path: str = "clawback.db",
@@ -401,7 +408,8 @@ def claim_cmd(
     \b
     Claim a clawback coin as recipient
     """
-    fee = int(float(fee) * MOJO_CONST)
+    fee: int = int(Decimal(fee_str) * MOJO_CONST)
+
     async def do_command(fee, wallet_id, target_address, fingerprint):
         node_client, wallet_client = await get_node_and_wallet_clients(node_rpc_port, wallet_rpc_port, fingerprint)
         if not fingerprint:
@@ -422,7 +430,7 @@ def claim_cmd(
 
             try:
                 await node_client.push_tx(spend)
-                print(f"Submitted spend to claim coin: {coin_id}")
+                print(f"Submitted spend to claim coin: {cb_coin.name()}")
             except ValueError as e:
                 if "ASSERT_SECONDS_RELATIVE_FAILED" in e.args[0]["error"]:
                     print("You are trying to claim the coin too early")
