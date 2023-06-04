@@ -6,7 +6,9 @@ Clawbacks use a `p2_1_of_n` puzzle which contains a merkle root of two puzzles: 
 
 
 ## Setup
-** NOTE: This package requires a synced node and wallet. **
+
+> **Note**
+> This package requires a synced node and wallet.
 
 1. Clone this repository
 ```shell
