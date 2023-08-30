@@ -1,0 +1,54 @@
+---
+name: Run Test Suite
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}--${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os.runs-on }}
+    name: All tests
+    timeout-minutes: 30
+    strategy:
+      max-parallel: 4
+      fail-fast: false
+      matrix:
+        os:
+          - runs-on: macos-latest
+          - runs-on: ubuntu-latest
+          - runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+
+      - name: Test code with pytest
+        shell: bash
+        run: |
+          python3 -m venv venv
+          if [[ ${{ matrix.os.runs-on }} == windows-latest ]]; then
+            source ./venv/Scripts/activate
+          else
+            . ./venv/bin/activate
+          fi
+          pip install --extra-index https://pypi.chia.net/simple/ --editable .[dev]
+          pytest tests/
