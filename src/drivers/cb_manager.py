@@ -312,9 +312,7 @@ class CBManager:
             )
 
             # Create signature
-            for pk_bytes, msg in pkm_pairs_for_conditions_dict(
-                conditions_dict, coin_spend.coin.name(), additional_data
-            ):
+            for pk_bytes, msg in pkm_pairs_for_conditions_dict(conditions_dict, coin_spend.coin, additional_data):
                 pk = G1Element.from_bytes(pk_bytes)
                 pk_list.append(pk)
                 msg_list.append(msg)
