@@ -41,6 +41,29 @@ jobs:
         with:
           python-version: 3.9
 
+      - name: Cache test blocks and plots
+        if: matrix.configuration.checkout_blocks_and_plots
+        uses: actions/cache@v3
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MIN: 1
+        id: test-blocks-plots
+        with:
+          path: |
+            ${{ github.workspace }}/.chia/blocks
+            ${{ github.workspace }}/.chia/test-plots
+          key: ${{ env.BLOCKS_AND_PLOTS_VERSION }}
+
+
+      - name: Checkout test blocks and plots
+        if: matrix.configuration.checkout_blocks_and_plots && steps.test-blocks-plots.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download -R Chia-Network/test-cache ${{ env.BLOCKS_AND_PLOTS_VERSION }} --archive=tar.gz -O - | tar xzf -
+          mkdir "${GITHUB_WORKSPACE}/.chia"
+          mv "${GITHUB_WORKSPACE}/test-cache-${{ env.BLOCKS_AND_PLOTS_VERSION }}/"* "${GITHUB_WORKSPACE}/.chia"
+
+
       - name: Test code with pytest
         shell: bash
         run: |
